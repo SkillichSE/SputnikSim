@@ -1,6 +1,0 @@
-PyQt5
-qasync
-requests
-aiohttp
-numpy
-sgp4
