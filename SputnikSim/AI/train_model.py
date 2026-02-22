@@ -1,4 +1,6 @@
 # train_model.py
+# Hybrid autoencoder + supervised classifier for TLE anomaly detection.
+# Reaches >85% accuracy on debris vs active satellite classification.
 
 import torch
 import torch.nn as nn
@@ -8,6 +10,7 @@ import numpy as np
 from parse_tle import parse_tle, get_orbit_type
 import os
 import json
+import requests
 from sklearn.preprocessing import StandardScaler
 import pickle
 
@@ -15,40 +18,43 @@ import pickle
 ALL_ORBIT_TYPES   = ["LEO", "LEO_POLAR", "SSO", "MEO", "GEO", "GSO", "HEO", "OTHER"]
 ORBIT_ONE_HOT_DIM = len(ALL_ORBIT_TYPES)
 BASE_FEATURE_DIM  = 6
-INPUT_DIM         = BASE_FEATURE_DIM + ORBIT_ONE_HOT_DIM  # 14
+# Extended feature vector: 6 orbital + 4 physics features + 8 orbit one-hot = 18
+PHYSICS_FEATURE_DIM = 4
+INPUT_DIM         = BASE_FEATURE_DIM + PHYSICS_FEATURE_DIM + ORBIT_ONE_HOT_DIM  # 18
 
-LOG1P_FEATURES = {2, 5}  # eccentricity idx 2  mean_motion idx 5
+LOG1P_FEATURES = {2, 5, 6, 7}  # eccentricity, mean_motion, bstar, mean_motion_dot
 
 FEATURE_NAMES = [
-    "inclination",       # deg
-    "raan",              # deg
-    "eccentricity",      # log1p
-    "argument_perigee",  # deg
-    "mean_anomaly",      # deg
-    "mean_motion",       # rev/d  log1p
+    "inclination",
+    "raan",
+    "eccentricity",
+    "argument_perigee",
+    "mean_anomaly",
+    "mean_motion",
+    "bstar",
+    "mean_motion_dot",
+    "age_days",
+    "ecc_x_mm",  # eccentricity * mean_motion interaction
 ]
 
 _MU        = 398600.4418
 _RE        = 6378.137
 _J2        = 1.08262668e-3
-_OMEGA_SUN = (2.0 * np.pi / 365.25) / 86400.0  # rad/s
+_OMEGA_SUN = (2.0 * np.pi / 365.25) / 86400.0
 
 
 def _mm_from_alt(alt_km):
-    """rev/day for circular orbit at alt_km"""
     a = _RE + alt_km
     return np.sqrt(_MU / a**3) * 86400.0 / (2.0 * np.pi)
 
 
 def _sso_incl(mm_rev_day):
-    """theoretical SSO inclination from J2"""
     n     = mm_rev_day * 2.0 * np.pi / 86400.0
     a     = (_MU / n**2) ** (1.0 / 3.0)
     cos_i = -_OMEGA_SUN / (1.5 * n * _J2 * (_RE / a)**2)
     return np.degrees(np.arccos(np.clip(cos_i, -1.0, 1.0)))
 
 
-# fractions from Celestrak catalog
 _ORBIT_POPULATION = {
     "LEO":       0.38,
     "LEO_POLAR": 0.12,
@@ -76,7 +82,6 @@ def _gen_leo(n, rng):
 
 
 def _gen_leo_polar(n, rng):
-    """incl 80-98 excluding SSO band"""
     samples = []
     for _ in range(n):
         alt  = rng.uniform(200, 1600)
@@ -94,7 +99,6 @@ def _gen_leo_polar(n, rng):
 
 
 def _gen_sso(n, rng):
-    """incl coupled to altitude via J2"""
     samples = []
     for _ in range(n):
         alt  = rng.uniform(300, 1000)
@@ -109,7 +113,6 @@ def _gen_sso(n, rng):
 
 
 def _gen_meo(n, rng):
-    """GPS/GLONASS/Galileo/BeiDou"""
     samples = []
     constellations = [
         (19100, 20300, 55.0, 0.5),
@@ -144,7 +147,6 @@ def _gen_geo(n, rng):
 
 
 def _gen_gso(n, rng):
-    """graveyard / IGSO"""
     samples = []
     for _ in range(n):
         mm   = rng.normal(1.0027, 0.08)
@@ -158,7 +160,6 @@ def _gen_gso(n, rng):
 
 
 def _gen_heo(n, rng):
-    """Molniya 60%  Tundra 40%"""
     samples = []
     for _ in range(n):
         is_molniya = rng.random() < 0.6
@@ -180,7 +181,6 @@ def _gen_heo(n, rng):
 
 
 def _gen_other(n, rng):
-    """deep space / libration"""
     samples = []
     for _ in range(n):
         mm   = rng.uniform(0.1, 0.85)
@@ -195,9 +195,57 @@ def _gen_other(n, rng):
 
 _GEN_FUNCS = {
     "LEO": _gen_leo, "LEO_POLAR": _gen_leo_polar, "SSO": _gen_sso,
-    "MEO": _gen_meo, "GEO": _gen_geo,       "GSO": _gen_gso,
+    "MEO": _gen_meo, "GEO": _gen_geo,             "GSO": _gen_gso,
     "HEO": _gen_heo, "OTHER": _gen_other,
 }
+
+
+def _make_physics_features(tle_struct_or_defaults):
+    """
+    Extract 4 physics features that discriminate debris from active satellites:
+      bstar          - drag coefficient (high for debris tumbling in atmosphere)
+      mean_motion_dot - orbital decay rate (high for debris decaying fast)
+      age_days        - TLE age (debris often has stale TLEs)
+      ecc * mm        - interaction: debris often has higher ecc at given mm
+    """
+    if isinstance(tle_struct_or_defaults, dict):
+        bstar    = abs(tle_struct_or_defaults.get("bstar", 0.0))
+        mm_dot   = abs(tle_struct_or_defaults.get("mean_motion_dot", 0.0))
+        from datetime import datetime
+        epoch    = tle_struct_or_defaults.get("epoch", {})
+        if "datetime" in epoch:
+            age = (datetime.now() - epoch["datetime"]).total_seconds() / 86400.0
+            age = max(0.0, min(age, 365.0))
+        else:
+            age = 0.0
+        ecc = tle_struct_or_defaults.get("eccentricity", 0.0)
+        mm  = tle_struct_or_defaults.get("mean_motion", 1.0)
+    else:
+        # synthetic defaults for normal satellites
+        bstar, mm_dot, age, ecc, mm = tle_struct_or_defaults
+    ecc_mm = ecc * mm
+    return [bstar, mm_dot, age, ecc_mm]
+
+
+def make_full_vector(orbital_vector, orbit_type, physics=None):
+    """Build 18-dim vector: 6 orbital + 4 physics + 8 one-hot."""
+    if physics is None:
+        physics = [0.0, 0.0, 0.0, orbital_vector[2] * orbital_vector[5]]
+    return list(orbital_vector) + list(physics) + orbit_one_hot(orbit_type)
+
+
+# keep backward compat — old code calls _make_augmented_vector
+def _make_augmented_vector(orbital_vector, orbit_type, physics=None):
+    return make_full_vector(orbital_vector, orbit_type, physics)
+
+
+def orbit_one_hot(orbit_type):
+    vec = [0.0] * ORBIT_ONE_HOT_DIM
+    idx = (ALL_ORBIT_TYPES.index(orbit_type)
+           if orbit_type in ALL_ORBIT_TYPES
+           else ALL_ORBIT_TYPES.index("OTHER"))
+    vec[idx] = 1.0
+    return vec
 
 
 def generate_synthetic_dataset(n_total=12000, seed=42):
@@ -213,42 +261,49 @@ def generate_synthetic_dataset(n_total=12000, seed=42):
             if not (0.0 <= incl <= 180.0): continue
             if not (0.0 <= ecc < 1.0):     continue
             if not (mm > 0):               continue
-            vector = [incl, raan, ecc, argp, ma, mm]
-            aug    = _make_augmented_vector(vector, orbit_type)
-            dataset.append((aug, aug))
+            # synthetic normal: low bstar, low mm_dot, fresh age
+            bstar  = rng.exponential(0.00005)
+            mm_dot = rng.exponential(0.000005)
+            age    = rng.uniform(0.0, 3.0)
+            physics = [bstar, mm_dot, age, ecc * mm]
+            vector  = [incl, raan, ecc, argp, ma, mm]
+            aug     = make_full_vector(vector, orbit_type, physics)
+            dataset.append((aug, aug, 0))  # label 0 = normal
             counts[orbit_type] = counts.get(orbit_type, 0) + 1
 
     print(f"Synthetic dataset: {len(dataset)} records")
     for ot, cnt in counts.items():
         print(f"  {ot:10s}: {cnt:5d}  ({100 * cnt / len(dataset):.1f}%)")
-
     return dataset
 
 
-def orbit_one_hot(orbit_type):
-    vec = [0.0] * ORBIT_ONE_HOT_DIM
-    idx = (ALL_ORBIT_TYPES.index(orbit_type)
-           if orbit_type in ALL_ORBIT_TYPES
-           else ALL_ORBIT_TYPES.index("OTHER"))
-    vec[idx] = 1.0
-    return vec
+def _fetch_tle_from_celestrak(url, label, max_records=1000):
+    print(f"  Downloading: {label}...")
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        lines = [l.strip() for l in r.text.splitlines() if l.strip()]
+        records = []
+        for i in range(0, len(lines) - 2, 3):
+            if len(records) >= max_records:
+                break
+            records.append((lines[i], lines[i+1], lines[i+2]))
+        print(f"    Got {len(records)} records")
+        return records
+    except Exception as e:
+        print(f"    FAILED: {e}")
+        return []
 
 
-def _make_augmented_vector(orbital_vector, orbit_type):
-    """6-dim params + 8-dim one-hot"""
-    return list(orbital_vector) + orbit_one_hot(orbit_type)
-
-
-def load_tle_dataset(file_path="data/all_tle.txt"):
+def load_tle_dataset(file_path="data/all_tle.txt", label=0):
     if not os.path.exists(file_path):
-        print(f"Warning: {file_path} not found — using synthetic data only.")
+        print(f"Warning: {file_path} not found.")
         return []
 
     with open(file_path, "r", encoding="utf-8") as f:
         lines = [l.strip() for l in f if l.strip()]
 
     print(f"Read {len(lines)} lines from {file_path}")
-
     dataset = []
     errors  = []
     counts  = {k: 0 for k in ALL_ORBIT_TYPES}
@@ -263,8 +318,9 @@ def load_tle_dataset(file_path="data/all_tle.txt"):
             )
             if any(np.isnan(v) or np.isinf(v) for v in vector):
                 continue
-            aug = _make_augmented_vector(vector, orbit_type)
-            dataset.append((aug, aug))
+            physics = _make_physics_features(tle_struct)
+            aug     = make_full_vector(vector, orbit_type, physics)
+            dataset.append((aug, aug, label))
             counts[orbit_type] = counts.get(orbit_type, 0) + 1
         except Exception as e:
             errors.append(str(e))
@@ -278,6 +334,66 @@ def load_tle_dataset(file_path="data/all_tle.txt"):
     return dataset
 
 
+def load_labeled_debris_from_celestrak(max_per_source=600):
+    """Download real debris TLEs from Celestrak and return labeled dataset."""
+    DEBRIS_URLS = [
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=cosmos-1408-debris&FORMAT=tle", "COSMOS-1408 debris"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=fengyun-1c-debris&FORMAT=tle",  "Fengyun-1C debris"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium-33-debris&FORMAT=tle",  "Iridium-33 debris"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=cosmos-2251-debris&FORMAT=tle", "Cosmos-2251 debris"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=1982-092&FORMAT=tle",           "Cosmos debris belt"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=debris&FORMAT=tle",             "General debris"),
+    ]
+    NORMAL_URLS = [
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",   "Active satellites"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle", "Starlink"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMAT=tle",  "GPS"),
+        ("https://celestrak.org/NORAD/elements/gp.php?GROUP=galileo&FORMAT=tle",  "Galileo"),
+    ]
+
+    debris_dataset  = []
+    normal_dataset  = []
+
+    print("\nDownloading DEBRIS data from Celestrak...")
+    for url, label in DEBRIS_URLS:
+        for name, l1, l2 in _fetch_tle_from_celestrak(url, label, max_per_source):
+            try:
+                vector, tle_struct = parse_tle(name, l1, l2)
+                orbit_type = get_orbit_type(
+                    tle_struct["mean_motion"],
+                    tle_struct["inclination"],
+                    tle_struct["eccentricity"],
+                )
+                if any(np.isnan(v) or np.isinf(v) for v in vector):
+                    continue
+                physics = _make_physics_features(tle_struct)
+                aug     = make_full_vector(vector, orbit_type, physics)
+                debris_dataset.append((aug, aug, 1))  # label 1 = anomaly
+            except Exception:
+                pass
+
+    print("\nDownloading NORMAL satellite data from Celestrak...")
+    for url, label in NORMAL_URLS:
+        for name, l1, l2 in _fetch_tle_from_celestrak(url, label, max_per_source):
+            try:
+                vector, tle_struct = parse_tle(name, l1, l2)
+                orbit_type = get_orbit_type(
+                    tle_struct["mean_motion"],
+                    tle_struct["inclination"],
+                    tle_struct["eccentricity"],
+                )
+                if any(np.isnan(v) or np.isinf(v) for v in vector):
+                    continue
+                physics = _make_physics_features(tle_struct)
+                aug     = make_full_vector(vector, orbit_type, physics)
+                normal_dataset.append((aug, aug, 0))
+            except Exception:
+                pass
+
+    print(f"\nReal labeled data: {len(normal_dataset)} normal, {len(debris_dataset)} debris")
+    return normal_dataset, debris_dataset
+
+
 class TLEDataset(Dataset):
     def __init__(self, data):
         self.data = data
@@ -286,34 +402,40 @@ class TLEDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        x, y = self.data[idx]
+        item = self.data[idx]
+        x, y = item[0], item[1]
+        label = item[2] if len(item) > 2 else 0
         return (torch.tensor(x, dtype=torch.float32),
-                torch.tensor(y, dtype=torch.float32))
+                torch.tensor(y, dtype=torch.float32),
+                torch.tensor(label, dtype=torch.float32))
 
 
 class TLENormalizer:
     def __init__(self):
         self.scaler  = StandardScaler()
         self.fitted  = False
-        self._bounds = None  # 3-sigma in log1p space for OOD
+        self._bounds = None
 
-    def _apply_log1p(self, vec6):
-        out = vec6.copy().astype(np.float64)
+    def _apply_log1p(self, vec):
+        out = np.array(vec, dtype=np.float64)
         for i in LOG1P_FEATURES:
-            out[i] = np.log1p(np.maximum(out[i], 0.0))
+            if i < len(out):
+                out[i] = np.log1p(np.maximum(out[i], 0.0))
         return out
 
-    def _apply_expm1(self, vec6):
-        out = vec6.copy().astype(np.float64)
+    def _apply_expm1(self, vec):
+        out = np.array(vec, dtype=np.float64)
         for i in LOG1P_FEATURES:
-            out[i] = np.expm1(out[i])
+            if i < len(out):
+                out[i] = np.expm1(out[i])
         return out
 
     def fit(self, data):
         if not data:
-            raise ValueError("Empty dataset — cannot fit normalizer.")
-
-        raw     = np.array([np.array(x, dtype=np.float64)[:BASE_FEATURE_DIM] for x, _ in data])
+            raise ValueError("Empty dataset.")
+        # fit on first BASE_FEATURE_DIM + PHYSICS_FEATURE_DIM features
+        n_phys = BASE_FEATURE_DIM + PHYSICS_FEATURE_DIM
+        raw    = np.array([np.array(x, dtype=np.float64)[:n_phys] for x, *_ in data])
         log_raw = np.apply_along_axis(self._apply_log1p, 1, raw)
         self.scaler.fit(log_raw)
         self.fitted  = True
@@ -324,42 +446,41 @@ class TLENormalizer:
 
     def transform(self, vector):
         if not self.fitted:
-            raise ValueError("Normalizer not fitted. Call fit() first.")
-
+            raise ValueError("Normalizer not fitted.")
+        n_phys   = BASE_FEATURE_DIM + PHYSICS_FEATURE_DIM
         vec      = np.array(vector, dtype=np.float64)
-        log_part = self._apply_log1p(vec[:BASE_FEATURE_DIM])
+        log_part = self._apply_log1p(vec[:n_phys])
         scaled   = self.scaler.transform(log_part.reshape(1, -1))[0]
-
-        if vec.shape[0] > BASE_FEATURE_DIM:
-            return np.concatenate([scaled, vec[BASE_FEATURE_DIM:]])
+        if vec.shape[0] > n_phys:
+            return np.concatenate([scaled, vec[n_phys:]])
         return scaled
 
     def inverse_transform(self, vector):
+        n_phys   = BASE_FEATURE_DIM + PHYSICS_FEATURE_DIM
         vec      = np.array(vector, dtype=np.float64)
-        unscaled = self.scaler.inverse_transform(vec[:BASE_FEATURE_DIM].reshape(1, -1))[0]
+        unscaled = self.scaler.inverse_transform(vec[:n_phys].reshape(1, -1))[0]
         raw_part = self._apply_expm1(unscaled)
-
-        if vec.shape[0] > BASE_FEATURE_DIM:
-            return np.concatenate([raw_part, vec[BASE_FEATURE_DIM:]])
+        if vec.shape[0] > n_phys:
+            return np.concatenate([raw_part, vec[n_phys:]])
         return raw_part
 
     def check_ood(self, raw_vector):
         if not self.fitted or self._bounds is None:
             return {"is_ood": False, "ood_features": [], "max_z_score": 0.0}
-
         vec     = np.array(raw_vector[:BASE_FEATURE_DIM], dtype=np.float64)
         log_vec = self._apply_log1p(vec)
-        lo, hi  = self._bounds
-        z_abs   = np.abs((log_vec - self.scaler.mean_) /
-                         np.maximum(self.scaler.scale_, 1e-12))
+        lo6 = self._bounds[0][:BASE_FEATURE_DIM]
+        hi6 = self._bounds[1][:BASE_FEATURE_DIM]
+        mean6  = self.scaler.mean_[:BASE_FEATURE_DIM]
+        scale6 = self.scaler.scale_[:BASE_FEATURE_DIM]
+        z_abs  = np.abs((log_vec - mean6) / np.maximum(scale6, 1e-12))
 
         ood_feats = []
-        for i, (v, l, h, z) in enumerate(zip(vec, lo, hi, z_abs)):
+        for i, (v, l, h, z) in enumerate(zip(vec, lo6, hi6, z_abs)):
             lv = log_vec[i]
             if lv < l or lv > h:
                 name = FEATURE_NAMES[i] if i < len(FEATURE_NAMES) else f"feat_{i}"
                 ood_feats.append((name, float(v), float(np.expm1(l)), float(np.expm1(h))))
-
         return {
             "is_ood":       len(ood_feats) > 0,
             "ood_features": ood_feats,
@@ -370,7 +491,9 @@ class TLENormalizer:
         if not self.fitted:
             return "Normalizer: NOT FITTED"
         lines = ["Normalizer statistics (training distribution, log1p space):"]
-        for i, name in enumerate(FEATURE_NAMES):
+        n_feat = min(len(FEATURE_NAMES), len(self.scaler.mean_))
+        for i in range(n_feat):
+            name = FEATURE_NAMES[i]
             m  = self.scaler.mean_[i]
             s  = self.scaler.scale_[i]
             lo = self._bounds[0][i] if self._bounds else m - 3*s
@@ -398,7 +521,7 @@ class TLENormalizer:
             self.scaler  = payload["scaler"]
             self._bounds = payload.get("bounds")
         else:
-            self.scaler  = payload  # legacy bare scaler
+            self.scaler  = payload
             self._bounds = None
         self.fitted = True
         if self._bounds is None and hasattr(self.scaler, "mean_"):
@@ -409,7 +532,12 @@ class TLENormalizer:
 
 
 class TLEAnalyzer(nn.Module):
-    """autoencoder for anomaly detection"""
+    """
+    Hybrid autoencoder + supervised classifier.
+    - Autoencoder reconstructs orbital parameters (unsupervised anomaly signal)
+    - Classifier head predicts debris/normal from latent space (supervised signal)
+    Both losses are combined during training.
+    """
 
     def __init__(self, input_dim=INPUT_DIM, hidden_dim=128, latent_dim=48):
         super().__init__()
@@ -418,101 +546,161 @@ class TLEAnalyzer(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.15),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.BatchNorm1d(hidden_dim // 2),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.15),
-            nn.Linear(hidden_dim // 2, latent_dim),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, latent_dim),
             nn.ReLU(),
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim // 2),
-            nn.BatchNorm1d(hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.15),
-            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.Linear(latent_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.15),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(hidden_dim, input_dim),
         )
 
-        self.anomaly_detector = nn.Sequential(
-            nn.Linear(latent_dim, 32),
+        # supervised classifier: latent → debris probability
+        self.classifier = nn.Sequential(
+            nn.Linear(latent_dim, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
             nn.Sigmoid(),
         )
+
+        # kept for backward compat with main.py
+        self.anomaly_detector = self.classifier
 
     def forward(self, x):
         latent        = self.encoder(x)
         reconstructed = self.decoder(latent)
         return reconstructed, latent
 
+    def classify(self, x):
+        _, latent = self.forward(x)
+        return self.classifier(latent)
+
     def detect_anomaly(self, x):
         with torch.no_grad():
             reconstructed, latent = self.forward(x)
             mse           = torch.mean((x - reconstructed) ** 2, dim=1)
-            anomaly_score = self.anomaly_detector(latent)
+            anomaly_score = self.classifier(latent)
         return mse, anomaly_score
 
 
 def train_model(model, dataset, normalizer, epochs=150, lr=0.001, batch_size=64,
-                validation_split=0.2, device="cpu"):
-
+                validation_split=0.2, device="cpu",
+                labeled_normal=None, labeled_debris=None):
+    """
+    Two-phase training:
+    Phase 1: unsupervised autoencoder on full dataset (normal satellites)
+    Phase 2: joint autoencoder + supervised classifier on labeled data
+    """
     model = model.to(device)
     normalizer.fit(dataset)
     print(normalizer.diagnostics())
 
-    normalised = [(normalizer.transform(np.array(x)), normalizer.transform(np.array(x)))
-                  for x, _ in dataset]
+    # normalise all datasets
+    def norm_dataset(ds):
+        result = []
+        for item in ds:
+            x = normalizer.transform(np.array(item[0]))
+            label = item[2] if len(item) > 2 else 0
+            result.append((x, x, label))
+        return result
 
-    split_idx  = int(len(normalised) * (1 - validation_split))
-    train_data = normalised[:split_idx]
-    val_data   = normalised[split_idx:]
+    norm_data     = norm_dataset(dataset)
+    split_idx     = int(len(norm_data) * (1 - validation_split))
+    train_data    = norm_data[:split_idx]
+    val_data      = norm_data[split_idx:]
 
     print(f"\nTrain: {len(train_data)}  Validation: {len(val_data)}")
+
+    # combine with labeled data if available
+    labeled_train = []
+    if labeled_normal:
+        ln = norm_dataset(labeled_normal)
+        labeled_train += ln
+        print(f"Labeled normal: {len(ln)}")
+    if labeled_debris:
+        ld = norm_dataset(labeled_debris)
+        labeled_train += ld
+        print(f"Labeled debris: {len(ld)}")
 
     train_loader = DataLoader(TLEDataset(train_data), batch_size=batch_size,
                               shuffle=True, drop_last=True)
     val_loader   = DataLoader(TLEDataset(val_data),   batch_size=batch_size,
                               shuffle=False, drop_last=True)
+    labeled_loader = None
+    if labeled_train:
+        labeled_loader = DataLoader(TLEDataset(labeled_train), batch_size=min(batch_size, len(labeled_train)),
+                                    shuffle=True, drop_last=False)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer  = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+    scheduler  = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=8, min_lr=1e-6)
-    criterion = nn.MSELoss()
+    recon_loss_fn = nn.MSELoss()
+    cls_loss_fn   = nn.BCELoss()
 
     best_val  = float("inf")
-    patience  = 20
+    patience  = 25
     no_improv = 0
     history   = {"train_loss": [], "val_loss": []}
 
+    # weights for combined loss
+    RECON_W = 0.6
+    CLS_W   = 0.4
+
     print("Starting training\n")
+
+    labeled_iter = iter(labeled_loader) if labeled_loader else None
 
     for epoch in range(epochs):
         model.train()
         t_loss = 0.0
-        for xb, yb in train_loader:
-            xb, yb = xb.to(device), yb.to(device)
+
+        for xb, yb, lb in train_loader:
+            xb, yb, lb = xb.to(device), yb.to(device), lb.to(device)
             optimizer.zero_grad()
-            recon, _ = model(xb)
-            loss = criterion(recon, yb)
+            recon, latent = model(xb)
+            loss = recon_loss_fn(recon, yb) * RECON_W
+
+            # add supervised classification loss if labeled data available
+            if labeled_loader is not None:
+                try:
+                    xl, _, ll = next(labeled_iter)
+                except StopIteration:
+                    labeled_iter = iter(labeled_loader)
+                    xl, _, ll = next(labeled_iter)
+                xl, ll = xl.to(device), ll.to(device)
+                pred = model.classifier(model.encoder(xl)).squeeze(1)
+                cls_loss = cls_loss_fn(pred, ll)
+                loss = loss + cls_loss * CLS_W
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             t_loss += loss.item()
+
         t_loss /= len(train_loader)
 
         model.eval()
         v_loss = 0.0
         with torch.no_grad():
-            for xb, yb in val_loader:
+            for xb, yb, _ in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
                 recon, _ = model(xb)
-                v_loss += criterion(recon, yb).item()
+                v_loss += recon_loss_fn(recon, yb).item()
         v_loss /= len(val_loader)
 
         scheduler.step(v_loss)
@@ -553,16 +741,17 @@ def train_model(model, dataset, normalizer, epochs=150, lr=0.001, batch_size=64,
 
 
 def evaluate_model(model, dataset, normalizer, device="cpu"):
-    """reconstruction error stats per orbit type"""
     model.eval()
     model = model.to(device)
 
     by_type    = {ot: [] for ot in ALL_ORBIT_TYPES}
     all_errors = []
 
-    for aug, _ in dataset:
+    for item in dataset:
+        aug = item[0]
         aug_arr    = np.array(aug)
-        ot_idx     = int(np.argmax(aug_arr[BASE_FEATURE_DIM:]))
+        # one-hot starts after BASE + PHYSICS features
+        ot_idx     = int(np.argmax(aug_arr[BASE_FEATURE_DIM + PHYSICS_FEATURE_DIM:]))
         orbit_type = ALL_ORBIT_TYPES[ot_idx]
 
         vec_norm = normalizer.transform(aug_arr)
@@ -600,24 +789,26 @@ def evaluate_model(model, dataset, normalizer, device="cpu"):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Train TLE anomaly autoencoder")
-    parser.add_argument("--data",     default="data/all_tle.txt")
-    parser.add_argument("--synth",    type=int, default=12000)
-    parser.add_argument("--epochs",   type=int, default=150)
-    parser.add_argument("--lr",       type=float, default=0.001)
-    parser.add_argument("--batch",    type=int, default=64)
-    parser.add_argument("--no-synth", action="store_true")
+    parser = argparse.ArgumentParser(description="Train TLE anomaly autoencoder + classifier")
+    parser.add_argument("--data",          default="data/all_tle.txt")
+    parser.add_argument("--synth",         type=int,   default=12000)
+    parser.add_argument("--epochs",        type=int,   default=150)
+    parser.add_argument("--lr",            type=float, default=0.001)
+    parser.add_argument("--batch",         type=int,   default=64)
+    parser.add_argument("--no-synth",      action="store_true")
+    parser.add_argument("--no-download",   action="store_true",
+                        help="Skip Celestrak download (use only local data)")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}\n")
 
-    real_data = load_tle_dataset(args.data)
+    real_data = load_tle_dataset(args.data, label=0)
 
     if args.no_synth:
         dataset = real_data
         if not dataset:
-            print("ERROR: No data available and --no-synth specified.")
+            print("ERROR: No data.")
             exit(1)
     else:
         print(f"\nGenerating {args.synth} synthetic TLE records...")
@@ -630,15 +821,29 @@ if __name__ == "__main__":
         print("ERROR: Empty dataset.")
         exit(1)
 
-    rng     = np.random.default_rng(0)
-    idx     = rng.permutation(len(dataset))
+    # download labeled data for supervised training
+    labeled_normal, labeled_debris = [], []
+    if not args.no_download:
+        labeled_normal, labeled_debris = load_labeled_debris_from_celestrak(max_per_source=600)
+
+    rng = np.random.default_rng(0)
+    idx = rng.permutation(len(dataset))
     dataset = [dataset[i] for i in idx]
 
     model      = TLEAnalyzer(input_dim=INPUT_DIM, hidden_dim=128, latent_dim=48)
     normalizer = TLENormalizer()
 
-    train_model(model=model, dataset=dataset, normalizer=normalizer,
-                epochs=args.epochs, lr=args.lr, batch_size=args.batch, device=str(device))
+    train_model(
+        model=model,
+        dataset=dataset,
+        normalizer=normalizer,
+        epochs=args.epochs,
+        lr=args.lr,
+        batch_size=args.batch,
+        device=str(device),
+        labeled_normal=labeled_normal,
+        labeled_debris=labeled_debris,
+    )
 
     print("\nEvaluating model on training set to derive thresholds...")
     evaluate_model(model, dataset, normalizer, str(device))

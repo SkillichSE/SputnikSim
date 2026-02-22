@@ -1,6 +1,9 @@
 # generate.py
-"""Generate analysis reports for all orbit types. Output text is in Russian."""
-
+"""
+Generate analysis reports and recommendations for all orbit types:
+LEO, LEO_POLAR, SSO, MEO, GEO, GSO, HEO.
+Output text is in Russian as required.
+"""
 import numpy as np
 from datetime import datetime
 from parse_tle import (
@@ -13,7 +16,7 @@ from parse_tle import (
 )
 
 
-# reference thresholds per orbit type
+# ── Reference parameters per orbit type ─────────────────────────────────────
 _ORBIT_REFS = {
     "GEO": {
         "incl_ideal": 0.0,   "incl_warn": 0.5,   "incl_crit": 2.0,
@@ -46,7 +49,7 @@ _ORBIT_REFS = {
         "alt_min":    200,   "alt_max":   2000,
     },
     "SSO": {
-        # incl_ideal computed dynamically via _sso_target_inclination
+        # incl_ideal=None: target computed dynamically via _sso_target_inclination()
         "incl_ideal": None,  "incl_warn": None,  "incl_crit": None,
         "ecc_warn":   0.01,  "ecc_crit":  0.05,
         "mm_ideal":   None,  "mm_tol":    None,
@@ -72,24 +75,43 @@ def _ref(orbit_type):
 
 
 def _sso_target_inclination(mean_motion):
-    """SSO incl from J2 nodal precession  accurate < 0.05 deg for 300-1200 km"""
-    J2        = 1.08262668e-3
-    RE        = 6378.137
-    MU        = 398600.4418
-    omega_sun = (2.0 * np.pi / 365.25) / 86400.0
+    """
+    Compute the theoretical SSO inclination for the given mean motion.
 
-    a     = max(RE + 200.0, calculate_semi_major_axis(mean_motion))
-    n     = np.sqrt(MU / a**3)
+    Sun-synchronous condition: nodal precession dOmega/dt = omega_sun.
+    From J2 perturbation theory (circular orbit):
+
+        dOmega/dt = -(3/2) * n * J2 * (R_E/a)^2 * cos(i)
+
+    Solving for i:
+        cos(i) = -omega_sun / [(3/2) * n * J2 * (R_E/a)^2]
+
+    Accurate to < 0.05 deg for 300-1200 km altitude.
+    """
+    J2        = 1.08262668e-3
+    RE        = 6378.137           # km
+    MU        = 398600.4418        # km^3/s^2
+    omega_sun = (2.0 * np.pi / 365.25) / 86400.0   # rad/s
+
+    a = calculate_semi_major_axis(mean_motion)
+    a = max(RE + 200.0, a)
+    n = np.sqrt(MU / a**3)
+
     cos_i = -omega_sun / (1.5 * n * J2 * (RE / a)**2)
-    return np.degrees(np.arccos(max(-1.0, min(1.0, cos_i))))
+    cos_i = max(-1.0, min(1.0, cos_i))
+    return np.degrees(np.arccos(cos_i))
 
 
 def assess_station_keeping(inclination, eccentricity, mean_motion, orbit_type):
-    """returns dict with urgency and recommendations list"""
-    ref             = _ref(orbit_type)
+    """
+    Evaluate station-keeping needs for the given orbit type.
+    Returns dict with urgency and recommendations list.
+    """
+    ref = _ref(orbit_type)
     recommendations = []
-    urgency         = "Низкая"
+    urgency = "Низкая"
 
+    # Inclination check
     if orbit_type == "SSO":
         incl_target = _sso_target_inclination(mean_motion)
         dev = abs(inclination - incl_target)
@@ -117,6 +139,7 @@ def assess_station_keeping(inclination, eccentricity, mean_motion, orbit_type):
                 elif urgency != "Высокая":
                     urgency = "Средняя"
 
+    # Eccentricity check
     ecc_warn = ref["ecc_warn"]
     ecc_crit = ref["ecc_crit"]
     if ecc_warn and eccentricity > ecc_warn:
@@ -129,7 +152,7 @@ def assess_station_keeping(inclination, eccentricity, mean_motion, orbit_type):
         elif urgency != "Высокая":
             urgency = "Средняя"
 
-    # longitude drift  GEO/GSO only
+    # Mean-motion / longitude drift (GEO/GSO only)
     mm_ideal = ref["mm_ideal"]
     mm_tol   = ref["mm_tol"]
     if mm_ideal is not None and mm_tol is not None:
@@ -150,6 +173,9 @@ def assess_station_keeping(inclination, eccentricity, mean_motion, orbit_type):
 
 
 def assess_collision_risk(altitude_km, eccentricity, inclination, orbit_type):
+    """
+    Estimate collision risk based on orbital regime and parameters.
+    """
     risk_level = "Низкий"
     warnings   = []
 
@@ -165,15 +191,21 @@ def assess_collision_risk(altitude_km, eccentricity, inclination, orbit_type):
                 f"Риск столкновения повышен."
             )
             risk_level = "Высокий"
-            # simulated conjunction data  real data requires Space-Track API
+            # simulated conjunction data (real data requires Space-Track API)
             import random
-            rng       = random.Random(int(altitude_km * 1000))
-            debris_id = f"{rng.randint(10000,99999)}U"
-            miss_dist = rng.randint(180, 950)
-            poc       = rng.uniform(1e-5, 3e-4)
-            warnings.append(f"  Опасный объект:   {debris_id} (обломок, симул. данные)")
-            warnings.append(f"  Miss Distance:    {miss_dist} м")
-            warnings.append(f"  PoC:              {poc:.2e}  [данные расчётные, требуют верификации]")
+            rng = random.Random(int(altitude_km * 1000))
+            debris_id  = f"{rng.randint(10000,99999)}U"
+            miss_dist  = rng.randint(180, 950)
+            poc        = rng.uniform(1e-5, 3e-4)
+            warnings.append(
+                f"  Опасный объект:   {debris_id} (обломок, симул. данные)"
+            )
+            warnings.append(
+                f"  Miss Distance:    {miss_dist} м"
+            )
+            warnings.append(
+                f"  PoC:              {poc:.2e}  [данные расчётные, требуют верификации]"
+            )
         elif altitude_km < 1000:
             warnings.append(
                 f"Орбита {altitude_km:.0f} км — зона повышенного содержания мусора. "
@@ -215,33 +247,43 @@ def assess_collision_risk(altitude_km, eccentricity, inclination, orbit_type):
 
 def calculate_delta_v_budget(inclination, eccentricity, mean_motion, orbit_type):
     """
-    dv_incl  = 2 * v_orb * sin(di/2)
-    dv_ecc   = v_orb * e / (1 + e)   Hohmann
-    dv_drift = proportional to mm deviation  GEO/GSO only
-    """
-    MU = 398600.4418
+    Estimate station-keeping delta-V (m/s) using physically correct formulas.
 
-    sma       = calculate_semi_major_axis(mean_motion)
+    Inclination change: DV = 2 * V_orb * sin(Di/2)   [exact plane-change maneuver]
+    Eccentricity fix:  DV ~ V_orb * e / (1 + e)       [Hohmann circularisation]
+    E-W drift GEO/GSO: proportional to mean-motion deviation
+    """
+    MU = 398600.4418   # km^3/s^2
+
+    sma = calculate_semi_major_axis(mean_motion)
     if sma <= 0:
         sma = EARTH_RADIUS + 400
-    v_orb_m_s = np.sqrt(MU / sma) * 1000.0  # m/s
+    v_orb_m_s = np.sqrt(MU / sma) * 1000.0   # m/s
 
     if orbit_type == "SSO":
         incl_target = _sso_target_inclination(mean_motion)
     else:
-        ref         = _ref(orbit_type)
+        ref = _ref(orbit_type)
         incl_target = ref["incl_ideal"] if ref["incl_ideal"] is not None else inclination
 
     incl_dev_rad = np.radians(abs(inclination - incl_target))
     dv_incl_full = 2.0 * v_orb_m_s * np.sin(incl_dev_rad / 2.0)
-    # small deviations < 0.1 deg  cap at realistic per-burn budget
-    dv_incl = min(dv_incl_full, 0.05) if abs(inclination - incl_target) < 0.1 else dv_incl_full
+    # for small deviations use realistic station-keeping budget (0.01–0.05 m/s per burn)
+    # large plane changes (> 0.1 deg) use full formula
+    if abs(inclination - incl_target) < 0.1:
+        dv_incl = min(dv_incl_full, 0.05)
+    else:
+        dv_incl = dv_incl_full
 
-    # near-circular: linear approx  otherwise Hohmann
-    dv_ecc = eccentricity * 10.0 if eccentricity < 0.01 else \
-             v_orb_m_s * eccentricity / max(1.0 + eccentricity, 1.0)
+    # eccentricity correction: realistic 0.01–0.05 m/s for near-circular orbits
+    if eccentricity < 0.01:
+        dv_ecc = eccentricity * 10.0   # ~0.01–0.1 m/s range
+    else:
+        dv_ecc = v_orb_m_s * eccentricity / max(1.0 + eccentricity, 1.0)
 
-    dv_mm = abs(mean_motion - 1.0) * 50.0 if orbit_type in ("GEO", "GSO") else 0.0
+    dv_mm = 0.0
+    if orbit_type in ("GEO", "GSO"):
+        dv_mm = abs(mean_motion - 1.0) * 50.0
 
     total = dv_incl + dv_ecc + dv_mm
 
@@ -269,7 +311,9 @@ def calculate_delta_v_budget(inclination, eccentricity, mean_motion, orbit_type)
 
 
 def assess_operational_status(bstar, mean_motion_dot, age_days, orbit_type):
-    """health check via BSTAR  mean_motion_dot  TLE age"""
+    """
+    Assess satellite health from BSTAR, mean motion derivative, and TLE age.
+    """
     status   = "Активный"
     warnings = []
 
@@ -320,10 +364,12 @@ def generate_detailed_text_with_values(tle_struct, reconstruction_error=None,
                                         effective_status=None,
                                         notes=None):
     """
-    Full Russian-language analysis report.
-    confidence       - arbitration string from main.py
-    effective_status - overrides raw AI status
-    notes            - extra warnings (OOD maneuver low-confidence)
+    Generate a full Russian-language analysis report for any orbit type.
+
+    Args:
+        confidence:       string from main.py arbitration (e.g. "Низкое (физические параметры в норме)")
+        effective_status: coherent status string overriding raw AI output
+        notes:            list of extra warning strings (OOD, maneuver, low-confidence)
     """
     required = ["inclination", "raan", "eccentricity",
                 "argument_perigee", "mean_anomaly", "mean_motion"]
@@ -360,7 +406,7 @@ def generate_detailed_text_with_values(tle_struct, reconstruction_error=None,
     fuel      = calculate_delta_v_budget(inclination, eccentricity, mean_motion, orbit_type)
     ops       = assess_operational_status(bstar, mean_motion_dot, age_days, orbit_type)
 
-    # elevate urgency if collision risk is high
+    # пункт 2: если риск высокий — срочность не может быть ниже "Средняя"
     if collision["risk_level"] == "Высокий" and station["urgency"] == "Низкая":
         station["urgency"] = "Средняя"
         station["recommendations"].append(
@@ -395,9 +441,10 @@ def generate_detailed_text_with_values(tle_struct, reconstruction_error=None,
         lines.append("\nОЦЕНКА МОДЕЛИ:")
         lines.append(f"  Ошибка реконструкции: {reconstruction_error:.6f}")
         if anomaly_score is not None:
-            score_status = ("Внимание: Обнаружено отклонение"
-                            if threshold is not None and anomaly_score > threshold
-                            else "В пределах нормы")
+            if threshold is not None and anomaly_score > threshold:
+                score_status = "Внимание: Обнаружено отклонение"
+            else:
+                score_status = "В пределах нормы"
             lines.append(f"  Оценка аномальности:  {anomaly_score:.4f}  [{score_status}]")
         if threshold is not None:
             raw_status = "АНОМАЛИЯ ОБНАРУЖЕНА" if is_anomaly_detected else "В пределах нормы"
@@ -455,6 +502,7 @@ def generate_detailed_text_with_values(tle_struct, reconstruction_error=None,
     if is_critical_fuel:
         actions.append("КРИТИЧНО: Оптимизировать расход топлива")
 
+    # Use effective_status from arbitration layer if available; otherwise fall back to raw AI
     resolved_status = effective_status if effective_status is not None else (
         "Аномалия" if (is_anomaly_detected and has_high_anom_score) else
         "Подозрительно" if is_anomaly_detected else
@@ -471,7 +519,7 @@ def generate_detailed_text_with_values(tle_struct, reconstruction_error=None,
             f"(доверие: {confidence or 'н/д'})"
         )
 
-    # suppress Активный if AI signals high-confidence anomaly
+    # Operational status check — coherent: suppress "Активный" if AI is high-confidence anomaly
     if ops["status"] != "Активный" and resolved_status != "Штатное функционирование":
         actions.append("Проверить операционный статус спутника")
     elif ops["status"] not in ("Активный", "Штатное функционирование"):
@@ -488,7 +536,7 @@ def generate_detailed_text_with_values(tle_struct, reconstruction_error=None,
 
 
 def generate_summary_text(tle_struct):
-    """single-line Russian summary"""
+    """Return a single-line Russian summary of the satellite state."""
     name         = tle_struct.get("name", "Неизвестный")
     mean_motion  = tle_struct.get("mean_motion", 0)
     inclination  = tle_struct.get("inclination", 0)

@@ -9,16 +9,16 @@ import argparse
 from datetime import datetime
 
 
-# anomaly thresholds per orbit type (reconstruction MSE)
+# p95 reconstruction error per orbit type (from train_model.py evaluation)
 ORBIT_THRESHOLDS = {
-    "GEO":       0.05,
-    "GSO":       0.08,
-    "MEO":       0.12,
-    "LEO":       0.10,
-    "LEO_POLAR": 0.10,
-    "SSO":       0.09,
-    "HEO":       0.18,
-    "OTHER":     0.20,
+    "LEO":       0.606,
+    "LEO_POLAR": 0.753,
+    "SSO":       0.709,
+    "MEO":       0.733,
+    "GEO":       1.436,
+    "GSO":       1.386,
+    "HEO":       3.222,
+    "OTHER":     1.977,
 }
 
 # normal BSTAR limits per orbit type
