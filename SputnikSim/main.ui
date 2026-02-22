@@ -1,0 +1,671 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1332</width>
+    <height>848</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QMainWindow {
+    background-color: #080c10;
+    color: #c8d8e8;
+    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+}
+
+QGroupBox {
+    background-color: #0d1520;
+    border: 1px solid #1e3a5a;
+    border-radius: 4px;
+    margin-top: 18px;
+    padding-top: 4px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 3px 14px;
+    color: #00eeff;
+    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+    font-size: 8pt;
+    font-weight: bold;
+    letter-spacing: 4px;
+    background-color: #0a1828;
+    border: 1px solid #00d4ff;
+    border-radius: 1px;
+}
+
+QTextEdit, QPlainTextEdit {
+    background-color: #050810;
+    border: 1px solid #0e2a40;
+    border-top: 2px solid #00d4ff;
+    border-radius: 0px;
+    padding: 10px;
+    color: #a8e4ff;
+    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+    font-size: 10pt;
+    selection-background-color: #0e4a6e;
+    selection-color: #ffffff;
+}
+
+QLineEdit {
+    background-color: #060a0e;
+    border: none;
+    border-left: 2px solid #0a4060;
+    border-radius: 0px;
+    padding: 4px 8px;
+    color: #00ff99;
+    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+    font-size: 10pt;
+    selection-background-color: #0e4a6e;
+}
+
+QLineEdit:focus {
+    border-left: 3px solid #00eeff;
+    background-color: #081420;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+QLineEdit[readOnly=&quot;true&quot;] {
+    color: #00ffaa;
+    border-left: 2px solid #00ff99;
+    background-color: #040810;
+    font-size: 10
+pt;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QLabel {
+    background-color: transparent;
+    border: none;
+    color: #5a9ab5;
+    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+    font-size: 10pt;
+    letter-spacing: 2px;
+    padding: 2px 6px;
+}
+
+QPushButton {
+    background-color: transparent;
+    border: 1px solid #00d4ff;
+    border-radius: 2px;
+    padding: 6px 16px;
+    color: #00d4ff;
+    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+    font-size: 9pt;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+
+QPushButton:hover {
+    background-color: #00d4ff;
+    color: #080c10;
+}
+
+QPushButton:pressed {
+    background-color: #008aaa;
+    border-color: #008aaa;
+    color: #080c10;
+}
+
+QScrollBar:vertical {
+    background: #060a0e;
+    width: 6px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background: #1e3a5a;
+    border-radius: 3px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #00d4ff;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background: #060a0e;
+    height: 6px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background: #1e3a5a;
+    border-radius: 3px;
+}
+
+QScrollArea {
+    background-color: #0d1520;
+    border: none;
+}
+</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <property name="maximumSize">
+    <size>
+     <width>16777215</width>
+     <height>16777215</height>
+    </size>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">QWidget#centralwidget {
+    background-color: #0e1117;
+}
+</string>
+   </property>
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="1" column="1" colspan="2">
+     <widget class="QGroupBox" name="map">
+      <property name="title">
+       <string>MAP</string>
+      </property>
+      <layout class="QGridLayout" name="gridLayout_4">
+       <item row="0" column="0">
+        <widget class="QLabel" name="map_pic">
+         <property name="text">
+          <string/>
+         </property>
+         <property name="pixmap">
+          <pixmap>map.jpg</pixmap>
+         </property>
+         <property name="scaledContents">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item row="2" column="1">
+     <widget class="QGroupBox" name="AI_helper">
+      <property name="font">
+       <font>
+        <pointsize>11</pointsize>
+       </font>
+      </property>
+      <property name="title">
+       <string>AI</string>
+      </property>
+      <layout class="QGridLayout" name="gridLayout_2">
+       <item row="0" column="0">
+        <layout class="QVBoxLayout" name="AI_Layout">
+         <item>
+          <widget class="QTextEdit" name="Answ">
+           <property name="readOnly">
+            <bool>true</bool>
+           </property>
+           <property name="html">
+            <string>&lt;!DOCTYPE HTML PUBLIC &quot;-//W3C//DTD HTML 4.0//EN&quot; &quot;http://www.w3.org/TR/REC-html40/strict.dtd&quot;&gt;
+&lt;html&gt;&lt;head&gt;&lt;meta name=&quot;qrichtext&quot; content=&quot;1&quot; /&gt;&lt;style type=&quot;text/css&quot;&gt;
+p, li { white-space: pre-wrap; }
+&lt;/style&gt;&lt;/head&gt;&lt;body style=&quot; font-family:'Consolas,Courier New,monospace'; font-size:10pt; font-weight:400; font-style:normal;&quot;&gt;
+&lt;p style=&quot;-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:'MS Shell Dlg 2'; font-size:11pt;&quot;&gt;&lt;br /&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item row="2" column="2">
+     <widget class="QGroupBox" name="Telemetry">
+      <property name="font">
+       <font>
+        <pointsize>11</pointsize>
+       </font>
+      </property>
+      <property name="title">
+       <string>TLE data</string>
+      </property>
+      <layout class="QGridLayout" name="gridLayout_3">
+       <item row="0" column="0">
+        <widget class="QScrollArea" name="scrollArea">
+         <property name="styleSheet">
+          <string notr="true">background-color: #161b22;</string>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="Telematry_Content">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>-396</y>
+            <width>558</width>
+            <height>639</height>
+           </rect>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QWidget#centralwidget {
+    background-color: #0e1117;
+}
+</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout">
+           <item>
+            <layout class="QHBoxLayout" name="Name">
+             <item>
+              <widget class="QLabel" name="name_param">
+               <property name="text">
+                <string>Name of sattalite</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="name_value">
+               <property name="text">
+                <string>potuzhnolet</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="Number">
+             <item>
+              <widget class="QLabel" name="num_param">
+               <property name="text">
+                <string>serial №</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="num_value">
+               <property name="text">
+                <string>2718281828459045</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="International_designator">
+             <item>
+              <widget class="QLabel" name="deignator_param">
+               <property name="text">
+                <string>international designator</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="designator_value">
+               <property name="text">
+                <string>84123 A</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="inclination">
+             <item>
+              <widget class="QLabel" name="iclination_param">
+               <property name="text">
+                <string>inclination</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="inclination_value">
+               <property name="text">
+                <string>98.5105</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="Right_ascenadion">
+             <item>
+              <widget class="QLabel" name="ascendation_param">
+               <property name="text">
+                <string>Right ascension of the ascending node</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="ascendation_value">
+               <property name="text">
+                <string>69.3305</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="date_time_fraction">
+             <item>
+              <widget class="QLabel" name="date_time_pararm">
+               <property name="text">
+                <string>epoch year &amp; Julian day fraction</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="date_time_value">
+               <property name="text">
+                <string>86 50.28438588</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="eccentricity">
+             <item>
+              <widget class="QLabel" name="eccentricity_param">
+               <property name="text">
+                <string>eccentricity</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="eccentricity_value">
+               <property name="text">
+                <string>001278</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="argument_of_perrige">
+             <item>
+              <widget class="QLabel" name="perrige_param">
+               <property name="text">
+                <string>argument of perigee</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="perrige_value">
+               <property name="text">
+                <string>63.2828</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="ballistic_cfcnt">
+             <item>
+              <widget class="QLabel" name="ballistic_param">
+               <property name="text">
+                <string>ballistic coefficient</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="ballistic_value">
+               <property name="text">
+                <string>0.00000140</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="_2nd_dirrative">
+             <item>
+              <widget class="QLabel" name="dirrative_param">
+               <property name="text">
+                <string>2nd derivative of mean motion</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="dirrative_value">
+               <property name="text">
+                <string>0.0000</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="mean_anomaly">
+             <item>
+              <widget class="QLabel" name="anomaly_param">
+               <property name="text">
+                <string>mean anomaly</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="anomaly_value">
+               <property name="text">
+                <string>296.9658</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="Radiation_pressure">
+             <item>
+              <widget class="QLabel" name="pressure_param">
+               <property name="text">
+                <string>Raniation pressure coefficient</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="pressure_value">
+               <property name="text">
+                <string>67960-4</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="mean_motion">
+             <item>
+              <widget class="QLabel" name="mean_motion_param">
+               <property name="text">
+                <string>mean motion</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="mean_motion_value">
+               <property name="text">
+                <string>14.24899292</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="ephemeris_type">
+             <item>
+              <widget class="QLabel" name="ephemeris_param">
+               <property name="text">
+                <string>ephemeris type</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="ephemeris_value">
+               <property name="text">
+                <string>0</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="element_number">
+             <item>
+              <widget class="QLabel" name="element_param">
+               <property name="text">
+                <string>element № &amp; Check sum</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="element_value">
+               <property name="text">
+                <string>5293</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="rottation_speed">
+             <item>
+              <widget class="QLabel" name="rottation_param">
+               <property name="text">
+                <string>Revolution number at epoch &amp; Check sum </string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="rottation_value">
+               <property name="text">
+                <string>346978</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item row="1" column="0" rowspan="2">
+     <widget class="QGroupBox" name="console">
+      <property name="font">
+       <font>
+        <pointsize>11</pointsize>
+       </font>
+      </property>
+      <property name="title">
+       <string>console</string>
+      </property>
+      <layout class="QGridLayout" name="gridLayout_5">
+       <item row="2" column="0">
+        <widget class="QTextEdit" name="consoleTextEdit">
+         <property name="font">
+          <font>
+           <family>Consolas,Courier New,monospace</family>
+           <pointsize>10</pointsize>
+          </font>
+         </property>
+         <property name="styleSheet">
+          <string notr="true"/>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
+         <property name="html">
+          <string>&lt;!DOCTYPE HTML PUBLIC &quot;-//W3C//DTD HTML 4.0//EN&quot; &quot;http://www.w3.org/TR/REC-html40/strict.dtd&quot;&gt;
+&lt;html&gt;&lt;head&gt;&lt;meta name=&quot;qrichtext&quot; content=&quot;1&quot; /&gt;&lt;style type=&quot;text/css&quot;&gt;
+p, li { white-space: pre-wrap; }
+&lt;/style&gt;&lt;/head&gt;&lt;body style=&quot; font-family:'Consolas,Courier New,monospace'; font-size:10pt; font-weight:400; font-style:normal;&quot;&gt;
+&lt;p style=&quot; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;span style=&quot; font-family:'MS Shell Dlg 2'; font-size:11pt;&quot;&gt;welcome&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <layout class="QHBoxLayout" name="horizontalLayout">
+         <item>
+          <widget class="QLineEdit" name="commandLineEdit">
+           <property name="text">
+            <string/>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="sendCommandButton">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="icon">
+            <iconset>
+             <normaloff>ico_send.png</normaloff>ico_send.png</iconset>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

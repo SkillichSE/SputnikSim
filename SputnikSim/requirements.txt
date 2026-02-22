@@ -1,0 +1,9 @@
+PyQt5
+qasync
+requests
+aiohttp
+numpy
+sgp4
+torch
+numpy
+scikit-learn
