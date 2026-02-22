@@ -199,7 +199,7 @@ QScrollArea {
        </font>
       </property>
       <property name="title">
-       <string>AI</string>
+       <string>Vega 1.0(AI)</string>
       </property>
       <layout class="QGridLayout" name="gridLayout_2">
        <item row="0" column="0">
