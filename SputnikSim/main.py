@@ -226,13 +226,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         def _beep():
             try:
-                import winsound
-                for freq, dur in sequence:
-                    winsound.Beep(freq, dur)
-            except Exception:
-                pass
-
-        threading.Thread(target=_beep, daemon=True).start()
+                import platform
+                if platform.system() == 'Windows':
+                    import winsound
+                    for freq, dur in sequence:
+                        winsound.Beep(freq, dur)
+        except Exception:
+            pass
 
     def _write_tle_for_ai(self, line0, line1, line2):
         try:
