@@ -231,8 +231,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     import winsound
                     for freq, dur in sequence:
                         winsound.Beep(freq, dur)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     def _write_tle_for_ai(self, line0, line1, line2):
         try:
