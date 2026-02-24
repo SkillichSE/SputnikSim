@@ -683,7 +683,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
 if __name__ == "__main__":
     app  = QtWidgets.QApplication(sys.argv)
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Sput.TLE.App")
+    import platform
+    if platform.system() == 'Windows':
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Sput.TLE.App")
     app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "App.ico")))
 
     loop = QEventLoop(app)
