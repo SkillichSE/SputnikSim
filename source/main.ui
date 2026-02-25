@@ -650,7 +650,7 @@ p, li { white-space: pre-wrap; }
             </size>
            </property>
            <property name="toolTip">
-            <string>Очистить консоль</string>
+            <string>Clear console</string>
            </property>
            <property name="text">
             <string>🗑</string>
@@ -672,7 +672,7 @@ p, li { white-space: pre-wrap; }
             </size>
            </property>
            <property name="toolTip">
-            <string>Сбросить delta и перезагрузить спутник</string>
+            <string>Reset delta and reload satellite</string>
            </property>
            <property name="text">
             <string>↺</string>
@@ -694,7 +694,7 @@ p, li { white-space: pre-wrap; }
             </size>
            </property>
            <property name="toolTip">
-            <string>Обновить базу TLE с Celestrak</string>
+            <string>Reload TLE database from Celestrak</string>
            </property>
            <property name="text">
             <string>⟳</string>
@@ -716,7 +716,7 @@ p, li { white-space: pre-wrap; }
             </size>
            </property>
            <property name="toolTip">
-            <string>Вкл/выкл звук (Beep)</string>
+            <string>Toggle sound (Beep)</string>
            </property>
            <property name="text">
             <string>🔊</string>

@@ -141,7 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         uic.loadUi("main.ui", self)
-        self.setWindowIcon(QIcon("app.ico"))
+        self.setWindowIcon(QIcon("App.ico"))
         self.Answ.setReadOnly(True)
         self.consoleTextEdit.setReadOnly(True)
         self.command_buffer = []
@@ -181,6 +181,46 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tle_loader.start()
 
         self._delta_suggest_worker = None
+        self._delta_suggestions_data = None   # last recommendations from DeltaSuggestWorker
+        self._ai_general_text = ""            # last text from general AI analysis
+        self._vega_mode = 'general'           # 'general' | 'delta'
+
+        # create toggle button and float it over the AI_helper GroupBox title area
+        from PyQt5.QtWidgets import QPushButton
+        self.toggleModeButton = QPushButton("⇄ DELTA VALUES", self.AI_helper)
+        self.toggleModeButton.setCheckable(True)
+        self.toggleModeButton.setFixedSize(130, 22)
+        self.toggleModeButton.setToolTip("Switch between general analysis and recommended delta values")
+        self.toggleModeButton.setStyleSheet("""
+            QPushButton {
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 8pt;
+                font-weight: bold;
+                letter-spacing: 1px;
+                padding: 2px 8px;
+                border: 1px solid #1e7a3a;
+                border-radius: 2px;
+                color: #00ff88;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: #00ff88;
+                color: #080c10;
+            }
+            QPushButton:checked {
+                background-color: #0a3020;
+                border-color: #00ff88;
+                color: #00ff88;
+            }
+        """)
+        # position button on the right side of the GroupBox title strip
+        self.toggleModeButton.move(self.AI_helper.width() - 140, 2)
+        self.toggleModeButton.raise_()
+        self.toggleModeButton.show()
+        self.toggleModeButton.clicked.connect(self._on_toggle_mode)
+
+        # reposition button when window is resized
+        self.AI_helper.resizeEvent = self._ai_helper_resize
 
     def _tle_bar(self, pct, downloaded, total):
         """build a progress string"""
@@ -317,15 +357,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.consoleTextEdit.append(f"[AI] Failed to write TLE file: {e}")
 
     def _run_ai_analysis(self):
-        self.Answ.clear()
-        self.Answ.append("<b>[AI]</b> Analysing satellite... please wait.")
+        self._ai_general_text = ""
+        if self._vega_mode == 'general':
+            self.Answ.clear()
+            self.Answ.append("<b>[AI]</b> Analysing satellite... please wait.")
         self._ai_worker = AIWorker()
         self._ai_worker.result_ready.connect(self._on_ai_result)
         self._ai_worker.start()
 
     def _on_ai_result(self, text):
-        self.Answ.clear()
-        self.Answ.append(text)
+        self._ai_general_text = text
+        if self._vega_mode == 'general':
+            self.Answ.clear()
+            self.Answ.append(text)
         self._play_sound('ai')
 
     def _update_live_position(self):
@@ -359,11 +403,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log(f"> {command}")
         self._play_sound('tick')
 
-        if self.loading_stage is not None:
+        parts = command.split()
+
+        # allow sat/help/live commands even during delta input
+        if self.loading_stage is not None and (not parts or parts[0].lower() not in ('sat', 'help', 'live', 'simulate')):
             self.process_satellite_parameter(command)
             return
-
-        parts = command.split()
 
         if parts[0].lower() == "help":
             self.consoleTextEdit.append(
@@ -419,8 +464,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             self.loading_stage = 'inclination'
 
-            # start async AI suggestions — show in Answ when ready
-            self._start_delta_suggestions()
+            # auto-switch Answ to delta recommendations mode
+            if not self.toggleModeButton.isChecked():
+                self.toggleModeButton.setChecked(True)
+                self._on_toggle_mode(True)
 
             self.consoleTextEdit.append("[INPUT] Enter new orbit parameters:")
             self.consoleTextEdit.append("Inclination (deg):")
@@ -512,8 +559,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self._write_tle_for_ai(line0, line1, line2)
             self._run_ai_analysis()
-
-            # compute current position and altitude
+            self._delta_suggestions_data = None  # reset stale data for new satellite
+            self._start_delta_suggestions()
             try:
                 _sat = Satrec.twoline2rv(line1, line2)
                 _now = datetime.now(timezone.utc)
@@ -611,6 +658,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self._write_tle_for_ai(line0, line1, line2)
             self._run_ai_analysis()
+            self._delta_suggestions_data = None  # reset stale data for new satellite
+            self._start_delta_suggestions()
             self._update_live_position()
 
             self.consoleTextEdit.append(
@@ -786,10 +835,12 @@ class MainWindow(QtWidgets.QMainWindow):
         line1 = self.sat_data.get('line1')
         line2 = self.sat_data.get('line2')
         if not line0 or not line1 or not line2:
-            self.Answ.setPlainText("[AI] Рекомендации недоступны: нет актуального TLE.")
+            if self._vega_mode == 'delta':
+                self.Answ.setPlainText("[AI] Рекомендации недоступны: нет актуального TLE.")
             return
 
-        self.Answ.setPlainText("[AI] Загрузка рекомендаций для коррекции орбиты…")
+        if self._vega_mode == 'delta':
+            self.Answ.setPlainText("[AI] Загрузка рекомендаций для коррекции орбиты…")
 
         self._delta_suggest_worker = DeltaSuggestWorker(line0, line1, line2)
         self._delta_suggest_worker.result_ready.connect(self._on_delta_suggestions_ready)
@@ -797,13 +848,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_delta_suggestions_ready(self, data):
         """Display AI recommendations in Answ."""
+        self._delta_suggestions_data = data
+        if self._vega_mode == 'delta':
+            self._show_delta_suggestions()
+
+    def _show_delta_suggestions(self):
+        """Render saved delta suggestions into Answ."""
+        data = self._delta_suggestions_data
         if data is None:
             self.Answ.setPlainText(
                 "[AI] Не удалось получить рекомендации — будут использованы только ваши значения."
             )
             return
         orbit_type = data.get("orbit_type", "")
-        ecc = max(0.0, float(data.get("eccentricity", 0)))  # eccentricity must be >= 0
+        ecc = max(0.0, float(data.get("eccentricity", 0)))
         self.Answ.setPlainText(
             f"[AI] Рекомендуемые параметры орбиты ({orbit_type}):\n\n"
             f"Inclination:      {data.get('inclination', 0):.4f}°\n"
@@ -811,8 +869,33 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Eccentricity:     {ecc:.6f}\n"
             f"Arg. Perigee:     {data.get('argument_perigee', 0):.4f}°\n"
             f"Mean Motion:      {data.get('mean_motion', 0):.8f} rev/day\n\n"
-            "Используйте эти значения при вводе delta."
         )
+
+    def _ai_helper_resize(self, event):
+        """Keep the toggle button pinned to the right of the GroupBox title on resize."""
+        self.toggleModeButton.move(self.AI_helper.width() - 140, 2)
+        type(self.AI_helper).resizeEvent(self.AI_helper, event)
+
+    def _on_toggle_mode(self, checked):
+        """Switch Answ between general AI analysis and delta recommendations."""
+        if checked:
+            self._vega_mode = 'delta'
+            self.toggleModeButton.setText("⇄ GENERAL")
+            if self._delta_suggestions_data is not None:
+                self._show_delta_suggestions()
+            else:
+                self.Answ.setPlainText(
+                    "[AI] Рекомендуемые значения delta недоступны.\n"
+                    "Выполните команду 'delta' для их загрузки."
+                )
+        else:
+            self._vega_mode = 'general'
+            self.toggleModeButton.setText("⇄ DELTA VALUES")
+            if self._ai_general_text:
+                self.Answ.clear()
+                self.Answ.append(self._ai_general_text)
+            else:
+                self.Answ.setPlainText("[AI] Общий анализ недоступен.")
 
     def update_satellite_marker(self, lat, lon):
         width  = self.map_pic.width()
@@ -841,5 +924,4 @@ if __name__ == "__main__":
     window._play_sound('start')
 
     with loop:
-
         loop.run_forever()
