@@ -2,3 +2,11 @@
 
 - Technical documentation: https://github.com/SkillichSE/SputnikSim/blob/main/tech_doc/tech_doc.pdf
 - Pitch deck: https://github.com/SkillichSE/SputnikSim/blob/main/pitch_deck/pitch_deck.pdf
+- Source: https://github.com/SkillichSE/SputnikSim/tree/main/source
+
+# To install
+
+- Run app_win for Windows 10+
+- Run app_lin for Linux Ubuntu 22.04+
+
+
