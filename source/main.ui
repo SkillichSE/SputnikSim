@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1332</width>
+    <width>1399</width>
     <height>848</height>
    </rect>
   </property>
@@ -89,7 +89,7 @@ QLabel {
     background-color: transparent;
     border: none;
     color: #5a9ab5;
-    font-family: &quot;Consolas&quot;, &quot;Courier New&quot;, monospace;
+    font-family: &quot;Calibri&quot;, &quot;Courier New&quot;, monospace;
     font-size: 14pt;
     letter-spacing: 2px;
     padding: 2px 6px;
@@ -246,9 +246,9 @@ p, li { white-space: pre-wrap; }
           <property name="geometry">
            <rect>
             <x>0</x>
-            <y>-396</y>
-            <width>558</width>
-            <height>639</height>
+            <y>-159</y>
+            <width>570</width>
+            <height>751</height>
            </rect>
           </property>
           <property name="styleSheet">
@@ -269,8 +269,19 @@ p, li { white-space: pre-wrap; }
              </item>
              <item>
               <widget class="QLineEdit" name="name_value">
+               <property name="font">
+                <font>
+                 <family>Consolas,Courier New,monospace</family>
+                 <pointsize>14</pointsize>
+                 <weight>75</weight>
+                 <bold>true</bold>
+                </font>
+               </property>
                <property name="text">
-                <string>potuzhnolet</string>
+                <string>Example sattelite</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
                </property>
               </widget>
              </item>
@@ -281,7 +292,7 @@ p, li { white-space: pre-wrap; }
              <item>
               <widget class="QLabel" name="num_param">
                <property name="text">
-                <string>serial №</string>
+                <string>Norrad ID</string>
                </property>
               </widget>
              </item>
@@ -344,7 +355,7 @@ p, li { white-space: pre-wrap; }
              <item>
               <widget class="QLabel" name="ascendation_param">
                <property name="text">
-                <string>Right ascension of the ascending node</string>
+                <string>Right ascension of the asc.node</string>
                </property>
               </widget>
              </item>
@@ -365,7 +376,7 @@ p, li { white-space: pre-wrap; }
              <item>
               <widget class="QLabel" name="date_time_pararm">
                <property name="text">
-                <string>epoch year &amp; Julian day fraction</string>
+                <string>epoch year &amp; day fraction</string>
                </property>
               </widget>
              </item>
@@ -491,7 +502,7 @@ p, li { white-space: pre-wrap; }
              <item>
               <widget class="QLabel" name="pressure_param">
                <property name="text">
-                <string>Raniation pressure coefficient</string>
+                <string>Radiation pressure coefficient</string>
                </property>
               </widget>
              </item>
@@ -575,7 +586,7 @@ p, li { white-space: pre-wrap; }
              <item>
               <widget class="QLabel" name="rottation_param">
                <property name="text">
-                <string>Revolution number at epoch &amp; Check sum </string>
+                <string>Revolution number at epoch &amp; Check Σ</string>
                </property>
               </widget>
              </item>
@@ -638,11 +649,11 @@ p, li { white-space: pre-wrap; }
              <height>28</height>
             </size>
            </property>
-           <property name="text">
-            <string>🗑</string>
-           </property>
            <property name="toolTip">
             <string>Очистить консоль</string>
+           </property>
+           <property name="text">
+            <string>🗑</string>
            </property>
           </widget>
          </item>
@@ -660,11 +671,11 @@ p, li { white-space: pre-wrap; }
              <height>28</height>
             </size>
            </property>
-           <property name="text">
-            <string>↺</string>
-           </property>
            <property name="toolTip">
             <string>Сбросить delta и перезагрузить спутник</string>
+           </property>
+           <property name="text">
+            <string>↺</string>
            </property>
           </widget>
          </item>
@@ -682,11 +693,11 @@ p, li { white-space: pre-wrap; }
              <height>28</height>
             </size>
            </property>
-           <property name="text">
-            <string>⟳</string>
-           </property>
            <property name="toolTip">
             <string>Обновить базу TLE с Celestrak</string>
+           </property>
+           <property name="text">
+            <string>⟳</string>
            </property>
           </widget>
          </item>
@@ -704,17 +715,17 @@ p, li { white-space: pre-wrap; }
              <height>28</height>
             </size>
            </property>
+           <property name="toolTip">
+            <string>Вкл/выкл звук (Beep)</string>
+           </property>
+           <property name="text">
+            <string>🔊</string>
+           </property>
            <property name="checkable">
             <bool>true</bool>
            </property>
            <property name="checked">
             <bool>true</bool>
-           </property>
-           <property name="text">
-            <string>🔊</string>
-           </property>
-           <property name="toolTip">
-            <string>Вкл/выкл звук (Beep)</string>
            </property>
           </widget>
          </item>
@@ -725,7 +736,7 @@ p, li { white-space: pre-wrap; }
          <property name="font">
           <font>
            <family>Consolas,Courier New,monospace</family>
-           <pointsize>10</pointsize>
+           <pointsize>14</pointsize>
           </font>
          </property>
          <property name="styleSheet">
