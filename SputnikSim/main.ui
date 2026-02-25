@@ -609,6 +609,117 @@ p, li { white-space: pre-wrap; }
        <string>console</string>
       </property>
       <layout class="QGridLayout" name="gridLayout_5">
+       <item row="0" column="0">
+        <layout class="QHBoxLayout" name="consoleHeaderLayout">
+         <item>
+          <spacer name="consoleHeaderSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="clearConsoleButton">
+           <property name="minimumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>🗑</string>
+           </property>
+           <property name="toolTip">
+            <string>Очистить консоль</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="resetSatButton">
+           <property name="minimumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>↺</string>
+           </property>
+           <property name="toolTip">
+            <string>Сбросить delta и перезагрузить спутник</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="reloadTleButton">
+           <property name="minimumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>⟳</string>
+           </property>
+           <property name="toolTip">
+            <string>Обновить базу TLE с Celestrak</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="soundToggleButton">
+           <property name="minimumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>80</width>
+             <height>28</height>
+            </size>
+           </property>
+           <property name="checkable">
+            <bool>true</bool>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+           <property name="text">
+            <string>🔊</string>
+           </property>
+           <property name="toolTip">
+            <string>Вкл/выкл звук (Beep)</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
        <item row="2" column="0">
         <widget class="QTextEdit" name="consoleTextEdit">
          <property name="font">
