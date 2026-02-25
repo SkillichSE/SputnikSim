@@ -237,9 +237,9 @@ def simulate(tle_line1, tle_line2, start_time, duration_hours=24, step_minutes=1
 def print_simulation_summary(summary, console_output=True):
 
     output = []
-    output.append("=" * 60)
+    output.append("=" * 58)
     output.append("SIMULATION SUMMARY")
-    output.append("=" * 60)
+    output.append("=" * 58)
     output.append(f"Duration:        {summary['duration_hours']:.1f} hours")
     output.append(f"Step:            {summary['step_minutes']:.1f} minutes")
     output.append(f"Total points:    {summary['total_points']}")
@@ -269,7 +269,7 @@ def print_simulation_summary(summary, console_output=True):
                 drift = summary['position_drift']
                 output.append(f"Drift:  LAT {drift['lat_deg']:+7.3f}°  LON {drift['lon_deg']:+8.3f}°")
 
-    output.append("=" * 60)
+    output.append("=" * 58)
 
     result = "\n".join(output)
 

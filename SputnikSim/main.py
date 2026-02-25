@@ -50,6 +50,34 @@ class TLELoaderWorker(QThread):
             self.finished.emit(False, 0)
 
 
+class DeltaSuggestWorker(QThread):
+    """Async worker: compute physics-based recommended orbit params for current TLE."""
+    result_ready = pyqtSignal(object)  # dict or None
+
+    def __init__(self, line0, line1, line2):
+        super().__init__()
+        self._line0 = line0
+        self._line1 = line1
+        self._line2 = line2
+
+    def run(self):
+        try:
+            # AI scripts use "from parse_tle import ..." — need AI folder in path
+            base = os.path.dirname(os.path.abspath(__file__))
+            ai_dir = os.path.join(base, "AI")
+            if ai_dir not in sys.path:
+                sys.path.insert(0, ai_dir)
+
+            from parse_tle import parse_tle
+            from generate import compute_recommended_orbit_params
+
+            _, tle_struct = parse_tle(self._line0, self._line1, self._line2)
+            rec = compute_recommended_orbit_params(tle_struct)
+            self.result_ready.emit(rec)
+        except Exception:
+            self.result_ready.emit(None)
+
+
 class AIWorker(QThread):
     result_ready = pyqtSignal(str)
 
@@ -119,6 +147,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.command_buffer = []
         self.sendCommandButton.clicked.connect(self.add_command_to_console)
         self.commandLineEdit.returnPressed.connect(self.add_command_to_console)
+        self.soundToggleButton.toggled.connect(self._on_sound_toggle)
+        self.clearConsoleButton.clicked.connect(self._clear_console)
+        self.resetSatButton.clicked.connect(self._reset_satellite)
+        self.reloadTleButton.clicked.connect(self._reload_tle)
 
         self.current_sat_number = None
         self.loading_stage      = None
@@ -147,6 +179,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.finished.connect(self._on_tle_loaded)
         self._tle_loader.start()
+
+        self._delta_suggest_worker = None
 
     def _tle_bar(self, pct, downloaded, total):
         """build a progress string"""
@@ -210,8 +244,41 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             super().keyPressEvent(event)
 
+
+    def _clear_console(self):
+        self.consoleTextEdit.clear()
+        self.consoleTextEdit.append("[SYSTEM] Console cleared")
+        self.consoleTextEdit.append("  Type 'help' for available commands\n")
+
+    def _reset_satellite(self):
+        if not self.sat_data:
+            self.consoleTextEdit.append("[ERROR] No satellite loaded\n")
+            return
+        norad_id = self.sat_data.get('norad_id')
+        if norad_id is None:
+            self.consoleTextEdit.append("[ERROR] Cannot reset — satellite loaded by index, use sat <NORAD_ID>\n")
+            return
+        self.consoleTextEdit.append(f"[RESET] Reloading NORAD {norad_id} with original parameters...\n")
+        self.load_satellite_by_norad_id(norad_id)
+
+    def _reload_tle(self):
+        if hasattr(self, '_tle_loader') and self._tle_loader.isRunning():
+            self.consoleTextEdit.append("[TLE] Already loading, please wait...\n")
+            return
+        self.consoleTextEdit.append("[TLE] Connecting to Celestrak...")
+        self._tle_progress_anchor = None
+        self._tle_loader = TLELoaderWorker()
+        self._tle_loader.progress.connect(self._on_tle_progress)
+        self._tle_loader.finished.connect(self._on_tle_loaded)
+        self._tle_loader.start()
+
+    def _on_sound_toggle(self, checked):
+        self.soundToggleButton.setText("🔊" if checked else "🔇")
+
     def _play_sound(self, sound):
-        """play beep"""
+        """play beep (skipped if sound disabled)"""
+        if not self.soundToggleButton.isChecked():
+            return
         sounds = {
             'ok':      [(880, 80), (1100, 120)],
             'error':   [(300, 150), (250, 200)],
@@ -233,6 +300,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         winsound.Beep(freq, dur)
             except Exception:
                 pass
+
+        # run sound playback in a tiny background thread so the UI stays responsive
+        if sequence:
+            threading.Thread(target=_beep, daemon=True).start()
 
     def _write_tle_for_ai(self, line0, line1, line2):
         try:
@@ -347,8 +418,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.consoleTextEdit.append("[ERROR] No satellite loaded. Use: sat <NORAD_ID>\n")
                 return
             self.loading_stage = 'inclination'
-            self.consoleTextEdit.append("[INPUT] Enter DELTA values for orbit modification:")
-            self.consoleTextEdit.append("DELTA Inclination:")
+
+            # start async AI suggestions — show in Answ when ready
+            self._start_delta_suggestions()
+
+            self.consoleTextEdit.append("[INPUT] Enter new orbit parameters:")
+            self.consoleTextEdit.append("Inclination (deg):")
             return
 
         if parts[0].lower() == "live":
@@ -559,27 +634,27 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.loading_stage == 'inclination':
                 self.sat_data['deltas']['inclination'] = param_value
                 self.loading_stage = 'raan'
-                self.consoleTextEdit.append("DELTA RAAN:")
+                self.consoleTextEdit.append("RAAN (deg):")
 
             elif self.loading_stage == 'raan':
                 self.sat_data['deltas']['raan'] = param_value
                 self.loading_stage = 'eccentricity'
-                self.consoleTextEdit.append("DELTA Eccentricity:")
+                self.consoleTextEdit.append("Eccentricity (0.x or 000xxxx):")
 
             elif self.loading_stage == 'eccentricity':
                 self.sat_data['deltas']['eccentricity'] = param_value
                 self.loading_stage = 'argument_perigee'
-                self.consoleTextEdit.append("DELTA Argument_of_Perigee:")
+                self.consoleTextEdit.append("Argument of Perigee (deg):")
 
             elif self.loading_stage == 'argument_perigee':
                 self.sat_data['deltas']['argument_perigee'] = param_value
                 self.loading_stage = 'mean_motion'
-                self.consoleTextEdit.append("DELTA Mean_Motion:")
+                self.consoleTextEdit.append("Mean Motion (rev/day):")
 
             elif self.loading_stage == 'mean_motion':
                 self.sat_data['deltas']['mean_motion'] = param_value
                 self.loading_stage = None
-                self.consoleTextEdit.append("[OK] DELTA input completed\n")
+                self.consoleTextEdit.append("[OK] Parameter input completed\n")
                 self._play_sound('ok')
                 self.apply_deltas_and_update()
 
@@ -595,14 +670,50 @@ class MainWindow(QtWidgets.QMainWindow):
 
             tokens, numbers_list = parse_tle_line(line2)
 
-            update_number(numbers_list[2], numbers_list[2][0] + deltas.get('inclination', 0))
-            update_number(numbers_list[3], numbers_list[3][0] + deltas.get('raan', 0))
-            update_number(numbers_list[4], numbers_list[4][0] + deltas.get('eccentricity', 0))
-            update_number(numbers_list[5], numbers_list[5][0] + deltas.get('argument_perigee', 0))
-            update_number(numbers_list[7], numbers_list[7][0] + deltas.get('mean_motion', 0))
+            # use absolute values provided by the user instead of deltas
+            if 'inclination' in deltas:
+                update_number(numbers_list[2], deltas['inclination'])
+            if 'raan' in deltas:
+                update_number(numbers_list[3], deltas['raan'])
+            if 'eccentricity' in deltas:
+                # TLE stores eccentricity as 7‑digit fractional part without decimal point.
+                # Accept either raw TLE-style value (e.g. 0008356 / 8356)
+                # or physical eccentricity (e.g. 0.0008356).
+                ecc_old_text = numbers_list[4][1]
+                width = len(ecc_old_text)
+                ecc_val = deltas['eccentricity']
+                if abs(ecc_val) < 1.0:
+                    scaled = int(round(ecc_val * (10 ** width)))
+                else:
+                    scaled = int(round(ecc_val))
+                update_number(numbers_list[4], scaled)
+            if 'argument_perigee' in deltas:
+                update_number(numbers_list[5], deltas['argument_perigee'])
+            if 'mean_motion' in deltas:
+                update_number(numbers_list[7], deltas['mean_motion'])
 
             updated_line2 = fix_checksum(build_tle_line(tokens))
             self.sat_data['line2'] = updated_line2
+
+            # try to persist updated TLE back into data.json so that
+            # subsequent loads of this satellite see the new line 2
+            try:
+                db_path = os.path.join("data.json")
+                if os.path.exists(db_path):
+                    with open(db_path, "r", encoding="utf-8") as f:
+                        db_data = json.load(f)
+                    line0 = self.sat_data.get('line0') or self.sat_data.get('name', '')
+                    line1 = self.sat_data.get('line1', '')
+                    # find matching triplet and replace only line 2
+                    for i in range(0, len(db_data) - 2, 3):
+                        if db_data[i] == line0 and db_data[i + 1] == line1 and db_data[i + 2] == line2:
+                            db_data[i + 2] = updated_line2
+                            with open(db_path, "w", encoding="utf-8") as f:
+                                json.dump(db_data, f)
+                            break
+            except Exception:
+                # if persistence fails, keep working with in‑memory TLE
+                pass
 
             self.consoleTextEdit.append("\n[OK] Orbit parameters updated:")
             self.consoleTextEdit.append(f"   {self.sat_data['line0']}")
@@ -634,7 +745,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.consoleTextEdit.append("[ERROR] No satellite loaded. Use: sat <NORAD_ID>\n")
             return
         if self.loading_stage is not None:
-            self.consoleTextEdit.append("[ERROR] Finish DELTA input first\n")
+            self.consoleTextEdit.append("[ERROR] Finish parameter input first\n")
             return
 
         orbit = self.sat_data.get('orbit_label', '')
@@ -668,6 +779,40 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._play_sound('sim')
         self._log(f"Simulation: {duration_hours}h step={step_minutes}min points={len(results)}")
+
+    def _start_delta_suggestions(self):
+        """Start async AI recommendations for delta; display in Answ when done."""
+        line0 = self.sat_data.get('line0')
+        line1 = self.sat_data.get('line1')
+        line2 = self.sat_data.get('line2')
+        if not line0 or not line1 or not line2:
+            self.Answ.setPlainText("[AI] Рекомендации недоступны: нет актуального TLE.")
+            return
+
+        self.Answ.setPlainText("[AI] Загрузка рекомендаций для коррекции орбиты…")
+
+        self._delta_suggest_worker = DeltaSuggestWorker(line0, line1, line2)
+        self._delta_suggest_worker.result_ready.connect(self._on_delta_suggestions_ready)
+        self._delta_suggest_worker.start()
+
+    def _on_delta_suggestions_ready(self, data):
+        """Display AI recommendations in Answ."""
+        if data is None:
+            self.Answ.setPlainText(
+                "[AI] Не удалось получить рекомендации — будут использованы только ваши значения."
+            )
+            return
+        orbit_type = data.get("orbit_type", "")
+        ecc = max(0.0, float(data.get("eccentricity", 0)))  # eccentricity must be >= 0
+        self.Answ.setPlainText(
+            f"[AI] Рекомендуемые параметры орбиты ({orbit_type}):\n\n"
+            f"Inclination:      {data.get('inclination', 0):.4f}°\n"
+            f"RAAN:             {data.get('raan', 0):.4f}°\n"
+            f"Eccentricity:     {ecc:.6f}\n"
+            f"Arg. Perigee:     {data.get('argument_perigee', 0):.4f}°\n"
+            f"Mean Motion:      {data.get('mean_motion', 0):.8f} rev/day\n\n"
+            "Используйте эти значения при вводе delta."
+        )
 
     def update_satellite_marker(self, lat, lon):
         width  = self.map_pic.width()
