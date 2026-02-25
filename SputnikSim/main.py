@@ -141,7 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         uic.loadUi("main.ui", self)
-        self.setWindowIcon(QIcon("App.ico"))
+        self.setWindowIcon(QIcon("app.ico"))
         self.Answ.setReadOnly(True)
         self.consoleTextEdit.setReadOnly(True)
         self.command_buffer = []
@@ -841,4 +841,5 @@ if __name__ == "__main__":
     window._play_sound('start')
 
     with loop:
+
         loop.run_forever()
