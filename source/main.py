@@ -445,11 +445,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.consoleTextEdit.setOpenLinks(False)
         self.consoleTextEdit.anchorClicked.connect(
             lambda url: __import__("webbrowser").open(url.toString()))
-<<<<<<< HEAD
-=======
 
         # ── patch append() so it ALWAYS resets link/underline formatting ──────
->>>>>>> 602066ab316587899554c7fb51ec5726b5522154
         _plain_fmt = QtGui.QTextCharFormat()
         _plain_fmt.setAnchor(False)
         _plain_fmt.setAnchorHref("")
@@ -457,21 +454,12 @@ class MainWindow(QtWidgets.QMainWindow):
         _plain_fmt.setForeground(QtGui.QColor(168, 228, 255))
 
         _orig_append = self.consoleTextEdit.append
-<<<<<<< HEAD
-
-=======
->>>>>>> 602066ab316587899554c7fb51ec5726b5522154
         def _safe_append(text, _fmt=_plain_fmt, _orig=_orig_append):
             self.consoleTextEdit.setCurrentCharFormat(_fmt)
             _orig(text)
             self.consoleTextEdit.setCurrentCharFormat(_fmt)
-<<<<<<< HEAD
-
-        self.consoleTextEdit.append = _safe_append
-=======
         self.consoleTextEdit.append = _safe_append
         # ─────────────────────────────────────────────────────────────────────
->>>>>>> 602066ab316587899554c7fb51ec5726b5522154
         self.command_buffer = []
         self.sendCommandButton.clicked.connect(self.add_command_to_console)
         self.commandLineEdit.returnPressed.connect(self.add_command_to_console)
@@ -785,7 +773,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 self._play_sound('live_on')
             return
-        # You found an easter egg, nice code check
+
         if parts[0].lower() == "skis":
             from PyQt5.QtGui import QTextCursor
             cursor = self.consoleTextEdit.textCursor()
@@ -800,7 +788,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.consoleTextEdit.setTextCursor(cursor)
             self.consoleTextEdit.append("")
             return
-
+            
         self.command_buffer.append(command)
 
     def search_satellite_by_name(self, query):
