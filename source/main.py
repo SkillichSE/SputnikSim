@@ -445,6 +445,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.consoleTextEdit.setOpenLinks(False)
         self.consoleTextEdit.anchorClicked.connect(
             lambda url: __import__("webbrowser").open(url.toString()))
+<<<<<<< HEAD
+=======
+
+        # ── patch append() so it ALWAYS resets link/underline formatting ──────
+>>>>>>> 602066ab316587899554c7fb51ec5726b5522154
         _plain_fmt = QtGui.QTextCharFormat()
         _plain_fmt.setAnchor(False)
         _plain_fmt.setAnchorHref("")
@@ -452,13 +457,21 @@ class MainWindow(QtWidgets.QMainWindow):
         _plain_fmt.setForeground(QtGui.QColor(168, 228, 255))
 
         _orig_append = self.consoleTextEdit.append
+<<<<<<< HEAD
 
+=======
+>>>>>>> 602066ab316587899554c7fb51ec5726b5522154
         def _safe_append(text, _fmt=_plain_fmt, _orig=_orig_append):
             self.consoleTextEdit.setCurrentCharFormat(_fmt)
             _orig(text)
             self.consoleTextEdit.setCurrentCharFormat(_fmt)
+<<<<<<< HEAD
 
         self.consoleTextEdit.append = _safe_append
+=======
+        self.consoleTextEdit.append = _safe_append
+        # ─────────────────────────────────────────────────────────────────────
+>>>>>>> 602066ab316587899554c7fb51ec5726b5522154
         self.command_buffer = []
         self.sendCommandButton.clicked.connect(self.add_command_to_console)
         self.commandLineEdit.returnPressed.connect(self.add_command_to_console)
@@ -909,31 +922,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 "─────────────────────────────────────────────\n"
             )
             if norad_id == 25544:
-                from PyQt5.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat
+                from PyQt5.QtGui import QTextCursor
                 cursor = self.consoleTextEdit.textCursor()
                 cursor.movePosition(QTextCursor.End)
                 cursor.insertBlock()
-                # insert the hyperlink
                 cursor.insertHtml(
                     "<span style='color:#00cfff;'>[ISS]</span>"
                     "&nbsp;Live stream:&nbsp;"
                     "<a href='https://isslivenow.com/' style='color:#44aaff;'>"
                     "https://isslivenow.com/</a>"
                 )
-                # move to end and insert a clean block — reset ALL formatting
-                cursor.movePosition(QTextCursor.End)
-                cursor.insertBlock()
-                plain_char = QTextCharFormat()
-                plain_char.setAnchor(False)
-                plain_char.setAnchorHref("")
-                plain_char.setForeground(QtGui.QColor(168, 228, 255))  # default console colour
-                plain_char.setFontUnderline(False)
-                cursor.setCharFormat(plain_char)
-                cursor.setBlockCharFormat(plain_char)
-                cursor.insertBlock()
-                cursor.setCharFormat(plain_char)
-                cursor.setBlockCharFormat(plain_char)
                 self.consoleTextEdit.setTextCursor(cursor)
+                self.consoleTextEdit.append("")
             self._log(f"Loaded satellite: {line0} (NORAD {norad_id})")
 
         except Exception as e:
