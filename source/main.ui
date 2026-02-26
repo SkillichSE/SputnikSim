@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>MainWindow</string>
+   <string>SputnikSim</string>
   </property>
   <property name="styleSheet">
    <string notr="true">QMainWindow {
@@ -292,7 +292,7 @@ p, li { white-space: pre-wrap; }
              <item>
               <widget class="QLabel" name="num_param">
                <property name="text">
-                <string>Norrad ID</string>
+                <string>NORAD ID</string>
                </property>
               </widget>
              </item>
@@ -732,7 +732,10 @@ p, li { white-space: pre-wrap; }
         </layout>
        </item>
        <item row="2" column="0">
-        <widget class="QTextEdit" name="consoleTextEdit">
+        <widget class="QTextBrowser" name="consoleTextEdit">
+         <property name="openExternalLinks">
+          <bool>false</bool>
+         </property>
          <property name="font">
           <font>
            <family>Consolas,Courier New,monospace</family>

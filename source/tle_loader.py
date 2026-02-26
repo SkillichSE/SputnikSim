@@ -11,7 +11,7 @@ def save_tle(progress_callback=None):
         response.raise_for_status()
 
         total = int(response.headers.get('content-length', 0))
-        ESTIMATED_TOTAL = 10 * 1024 * 1024  # 10 MB
+        ESTIMATED_TOTAL = 10 * 1024 * 1024
         downloaded = 0
         chunks = []
 

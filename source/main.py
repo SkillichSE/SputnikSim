@@ -11,8 +11,8 @@ import re
 import asyncio
 import json
 from datetime import datetime, timezone
-from PyQt5 import QtWidgets, uic
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer
+from PyQt5 import QtWidgets, QtGui, QtCore, uic
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QPointF, QRect
 from PyQt5.QtWidgets import QLabel
 from qasync import QEventLoop
 from tle_loader import save_tle, dataset_sat, parse_tle_fields, find_satellite_by_norad_id
@@ -23,7 +23,7 @@ import threading
 import ctypes
 import sys
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QFont, QRadialGradient, QBrush
 
 def _orbit_label_from_alt(alt_km, inclination=None):
     """return a short human-readable orbit label"""
@@ -137,6 +137,304 @@ class AIWorker(QThread):
             self.result_ready.emit(f"[AI] Error: {e}")
 
 
+
+class SimulateWorker(QThread):
+    """Run orbit simulation in background thread."""
+    finished = pyqtSignal(object, object)  # results, summary
+    error    = pyqtSignal(str)
+
+    def __init__(self, line1, line2, start_time, duration_hours, step_minutes):
+        super().__init__()
+        self._line1           = line1
+        self._line2           = line2
+        self._start_time      = start_time
+        self._duration_hours  = duration_hours
+        self._step_minutes    = step_minutes
+
+    def run(self):
+        try:
+            results, summary = simulate(
+                self._line1, self._line2, self._start_time,
+                duration_hours=self._duration_hours,
+                step_minutes=self._step_minutes,
+            )
+            self.finished.emit(results, summary)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class SplashScreen(QtWidgets.QSplashScreen):
+    """Animated splash screen with orbiting satellite."""
+
+    def __init__(self):
+        # create blank pixmap — we draw everything ourselves
+        px = QPixmap(520, 340)
+        px.fill(QtGui.QColor(0, 0, 0, 0))
+        super().__init__(px, Qt.WindowStaysOnTopHint)
+        self.setWindowFlag(Qt.FramelessWindowHint)
+
+        self._angle = 0.0
+        self._dots  = 0
+
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(30)
+
+        self._status = "Initializing..."
+
+    def set_status(self, text):
+        self._status = text
+        self._tick()
+
+    def _tick(self):
+        self._angle = (self._angle + 2.5) % 360
+        self._redraw()
+
+    def _redraw(self):
+        import math
+        W, H = 520, 340
+        px = QPixmap(W, H)
+        px.fill(QtGui.QColor(8, 12, 24))
+
+        p = QPainter(px)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        # background stars (static seed)
+        import random
+        rng = random.Random(42)
+        for _ in range(80):
+            sx = rng.randint(0, W)
+            sy = rng.randint(0, H)
+            sr = rng.uniform(0.5, 1.5)
+            alpha = rng.randint(80, 220)
+            p.setBrush(QtGui.QColor(255, 255, 255, alpha))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QtCore.QPointF(sx, sy), sr, sr)
+
+        cx, cy = W // 2, H // 2 - 20
+        R_logo = 68          # logo circle radius (same as old R_earth)
+        R_orb_x, R_orb_y = 130, 50
+
+        rad = math.radians(self._angle)
+        sat_x = cx + R_orb_x * math.cos(rad)
+        sat_y = cy + R_orb_y * math.sin(rad)
+        behind = math.sin(rad) < 0
+
+        # ── back half orbit dashes ──────────────────────────
+        pen_orb_back = QPen(QtGui.QColor(80, 160, 255, 35), 1, Qt.DashLine)
+        p.setPen(pen_orb_back)
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(
+            int(cx - R_orb_x), int(cy - R_orb_y),
+            int(R_orb_x * 2), int(R_orb_y * 2),
+            0, 180 * 16
+        )
+
+        # ── satellite & trail when BEHIND logo ──────────────
+        if behind:
+            for i in range(1, 12):
+                a2 = math.radians(self._angle - i * 4)
+                if math.sin(a2) >= 0:
+                    break
+                tx = cx + R_orb_x * math.cos(a2)
+                ty = cy + R_orb_y * math.sin(a2)
+                alpha = int(100 * (1 - i / 12))
+                p.setBrush(QtGui.QColor(0, 200, 255, alpha))
+                p.setPen(Qt.NoPen)
+                p.drawEllipse(QtCore.QPointF(tx, ty), 1.5, 1.5)
+            p.save()
+            p.translate(sat_x, sat_y)
+            p.rotate(self._angle)
+            p.setOpacity(0.25)
+            p.setBrush(QtGui.QColor(200, 220, 255))
+            p.setPen(QPen(QtGui.QColor(100, 180, 255), 1))
+            p.drawRect(-5, -3, 10, 6)
+            p.setBrush(QtGui.QColor(0, 120, 255, 180))
+            p.drawRect(-14, -1, 8, 2)
+            p.drawRect(6,   -1, 8, 2)
+            p.setOpacity(1.0)
+            p.restore()
+
+        # ── logo (drawn on top of back-half satellite) ───────
+        # outer glow ring
+        glow = QtGui.QRadialGradient(cx, cy, R_logo * 1.45)
+        glow.setColorAt(0.70, QtGui.QColor(40, 120, 255, 0))
+        glow.setColorAt(1.00, QtGui.QColor(40, 120, 255, 60))
+        p.setBrush(QtGui.QBrush(glow))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QtCore.QPointF(cx, cy), R_logo * 1.45, R_logo * 1.45)
+
+        # try to load ico.jpg; fall back to a dark circle if missing
+        logo_src = QPixmap("ico.png")
+        if not logo_src.isNull():
+            # clip to circle
+            diameter = int(R_logo * 2)
+            logo_round = QPixmap(diameter, diameter)
+            logo_round.fill(Qt.transparent)
+            lp = QPainter(logo_round)
+            lp.setRenderHint(QPainter.Antialiasing)
+            lp.setRenderHint(QPainter.SmoothPixmapTransform)
+            from PyQt5.QtGui import QPainterPath
+            path = QPainterPath()
+            path.addEllipse(0, 0, diameter, diameter)
+            lp.setClipPath(path)
+            scaled = logo_src.scaled(diameter, diameter,
+                                     Qt.KeepAspectRatioByExpanding,
+                                     Qt.SmoothTransformation)
+            # centre-crop
+            ox = (scaled.width()  - diameter) // 2
+            oy = (scaled.height() - diameter) // 2
+            lp.drawPixmap(0, 0, scaled, ox, oy, diameter, diameter)
+            lp.end()
+            p.drawPixmap(int(cx - R_logo), int(cy - R_logo), logo_round)
+        else:
+            # fallback — plain dark circle
+            grad = QtGui.QRadialGradient(cx - 15, cy - 15, R_logo * 1.2)
+            grad.setColorAt(0.0, QtGui.QColor(30, 80, 180))
+            grad.setColorAt(0.6, QtGui.QColor(20, 120, 60))
+            grad.setColorAt(1.0, QtGui.QColor(10, 40, 120))
+            p.setBrush(QtGui.QBrush(grad))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QtCore.QPointF(cx, cy), R_logo, R_logo)
+
+        # thin border ring over logo
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QtGui.QColor(60, 140, 255, 100), 1.5))
+        p.drawEllipse(QtCore.QPointF(cx, cy), R_logo, R_logo)
+
+        # ── front half orbit dashes ──────────────────────────
+        pen_orb_front = QPen(QtGui.QColor(80, 160, 255, 70), 1, Qt.DashLine)
+        p.setPen(pen_orb_front)
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(
+            int(cx - R_orb_x), int(cy - R_orb_y),
+            int(R_orb_x * 2), int(R_orb_y * 2),
+            180 * 16, 180 * 16
+        )
+
+        # ── satellite & trail when IN FRONT of logo ──────────
+        if not behind:
+            for i in range(1, 14):
+                a2 = math.radians(self._angle - i * 4)
+                tx = cx + R_orb_x * math.cos(a2)
+                ty = cy + R_orb_y * math.sin(a2)
+                alpha = int(180 * (1 - i / 14))
+                p.setBrush(QtGui.QColor(0, 200, 255, alpha))
+                p.setPen(Qt.NoPen)
+                r2 = 2.5 * (1 - i / 14)
+                p.drawEllipse(QtCore.QPointF(tx, ty), r2, r2)
+            p.save()
+            p.translate(sat_x, sat_y)
+            p.rotate(self._angle)
+            p.setBrush(QtGui.QColor(200, 220, 255))
+            p.setPen(QPen(QtGui.QColor(100, 180, 255), 1))
+            p.drawRect(-5, -3, 10, 6)
+            p.setBrush(QtGui.QColor(0, 120, 255, 200))
+            p.drawRect(-14, -1, 8, 2)
+            p.drawRect(6,   -1, 8, 2)
+            p.restore()
+
+        # ── title ────────────────────────────────────────────
+        p.setPen(QtGui.QColor(255, 255, 255))
+        f = QtGui.QFont("Consolas", 26, QtGui.QFont.Bold)
+        p.setFont(f)
+        p.drawText(QtCore.QRect(0, H - 95, W, 36), Qt.AlignCenter, "SputnikSim")
+
+        p.setPen(QtGui.QColor(80, 160, 255))
+        f2 = QtGui.QFont("Consolas", 9)
+        p.setFont(f2)
+        p.drawText(QtCore.QRect(0, H - 62, W, 20), Qt.AlignCenter,
+                   "Satellite Orbit Analysis & Simulation System")
+
+        # ── progress bar (smooth, no dots) ───────────────────
+        bar_w, bar_h = 320, 4
+        bar_x = (W - bar_w) // 2
+        bar_y = H - 28
+        # background track
+        p.setBrush(QtGui.QColor(40, 50, 70))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(bar_x, bar_y, bar_w, bar_h, 2, 2)
+        # animated fill — bouncing scanner effect
+        import math as _m
+        phase = (self._angle / 360.0) % 1.0
+        fill_w = int(bar_w * (0.4 + 0.35 * abs(_m.sin(phase * _m.pi * 2))))
+        fill_x = bar_x + int((bar_w - fill_w) * (0.5 + 0.5 * _m.sin(phase * _m.pi * 2)))
+        bar_grad = QtGui.QLinearGradient(fill_x, 0, fill_x + fill_w, 0)
+        bar_grad.setColorAt(0.0, QtGui.QColor(0, 120, 255, 0))
+        bar_grad.setColorAt(0.3, QtGui.QColor(0, 200, 255, 255))
+        bar_grad.setColorAt(0.7, QtGui.QColor(0, 200, 255, 255))
+        bar_grad.setColorAt(1.0, QtGui.QColor(0, 120, 255, 0))
+        p.setBrush(QtGui.QBrush(bar_grad))
+        p.drawRoundedRect(fill_x, bar_y, fill_w, bar_h, 2, 2)
+
+        # status text (no dots — static)
+        p.setPen(QtGui.QColor(140, 200, 100))
+        f3 = QtGui.QFont("Consolas", 8)
+        p.setFont(f3)
+        p.drawText(QtCore.QRect(0, H - 18, W, 16), Qt.AlignCenter, self._status)
+
+        p.end()
+        self.setPixmap(px)
+
+    def mousePressEvent(self, event):
+        pass  # ignore clicks — do not close on click
+
+    def stop(self):
+        self._timer.stop()
+
+
+
+class MapWidget(QLabel):
+    """QLabel with trajectory and satellite marker painted on top."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._trajectory = []
+        self._sat_pos = None
+
+    def set_trajectory(self, points):
+        self._trajectory = points
+        self.update()
+
+    def set_satellite(self, lat, lon):
+        self._sat_pos = (lat, lon)
+        self.update()
+
+    def clear_trajectory(self):
+        self._trajectory = []
+        self.update()
+
+    def _to_xy(self, lat, lon):
+        w, h = self.width(), self.height()
+        return int((lon + 180) / 360 * w), int((90 - lat) / 180 * h)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if len(self._trajectory) >= 2:
+            pen = QPen(QColor(0, 180, 255, 200))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            prev = None
+            for lat, lon in self._trajectory:
+                x, y = self._to_xy(lat, lon)
+                if prev and abs(x - prev[0]) < self.width() * 0.5:
+                    painter.drawLine(prev[0], prev[1], x, y)
+                prev = (x, y)
+
+        if self._sat_pos:
+            lat, lon = self._sat_pos
+            x, y = self._to_xy(lat, lon)
+            painter.setPen(QPen(QColor(255, 50, 50), 2))
+            painter.setBrush(QColor(255, 50, 50))
+            painter.drawEllipse(x - 6, y - 6, 12, 12)
+
+        painter.end()
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -144,6 +442,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowIcon(QIcon("App.ico"))
         self.Answ.setReadOnly(True)
         self.consoleTextEdit.setReadOnly(True)
+        self.consoleTextEdit.setOpenLinks(False)
+        self.consoleTextEdit.anchorClicked.connect(
+            lambda url: __import__("webbrowser").open(url.toString()))
         self.command_buffer = []
         self.sendCommandButton.clicked.connect(self.add_command_to_console)
         self.commandLineEdit.returnPressed.connect(self.add_command_to_console)
@@ -164,19 +465,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self._session_log = open("session.log", "a", encoding="utf-8")
         self._log(f"=== SESSION START {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
 
-        self.satPoint = QLabel(self.map_pic)
-        self.satPoint.setFixedSize(15, 15)
-        self.satPoint.setStyleSheet("background-color: red; border-radius: 7px;")
-        self.satPoint.hide()
+        # inject MapWidget in place of map_pic QLabel
+        self._map_widget = MapWidget()
+        _px = self.map_pic.pixmap()
+        if _px:
+            self._map_widget.setPixmap(_px)
+        else:
+            self._map_widget.setPixmap(QPixmap('map.jpg'))
+        self._map_widget.setScaledContents(True)
+        _layout = self.map_pic.parent().layout()
+        if _layout:
+            _layout.replaceWidget(self.map_pic, self._map_widget)
+        self.map_pic.hide()
+        self.map_pic = self._map_widget
 
-        self.consoleTextEdit.append("[SYSTEM] Console ready")
-        self.consoleTextEdit.append("  Type 'help' for available commands\n")
-        self.consoleTextEdit.append("[TLE] Connecting to Celestrak...")
         # progress line
         self._tle_progress_anchor = None
 
         self._tle_loader = TLELoaderWorker()
-        self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.finished.connect(self._on_tle_loaded)
         self._tle_loader.start()
 
@@ -222,44 +528,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # reposition button when window is resized
         self.AI_helper.resizeEvent = self._ai_helper_resize
 
-    def _tle_bar(self, pct, downloaded, total):
-        """build a progress string"""
-        W = 30
-        filled = int(W * pct / 100)
-        bar = "█" * filled + "░" * (W - filled)
-        if total > 0:
-            return f"[TLE] [{bar}] {pct:3d}%  {downloaded // 1024} / {total // 1024} KB"
-        return f"[TLE] [{bar}]  {downloaded // 1024} KB"
-
-    def _tle_overwrite_line(self, text):
-        from PyQt5.QtGui import QTextCursor
-        doc = self.consoleTextEdit.document()
-        if self._tle_progress_anchor is None:
-            # first call
-            self.consoleTextEdit.append(text)
-            self._tle_progress_anchor = doc.blockCount() - 1
-        else:
-            block = doc.findBlockByNumber(self._tle_progress_anchor)
-            if block.isValid():
-                cursor = QTextCursor(block)
-                cursor.movePosition(QTextCursor.StartOfBlock)
-                cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
-                cursor.insertText(text)
-        # immediate visual update
-        self.consoleTextEdit.repaint()
-
-    def _on_tle_progress(self, downloaded, total):
-        pct = min(int(downloaded / total * 100), 99) if total > 0 else 0
-        self._tle_overwrite_line(self._tle_bar(pct, downloaded, total))
-
     def _on_tle_loaded(self, success, count):
-        W = 30
-        if success:
-            self._tle_overwrite_line(f"[TLE] [{'█' * W}] 100%  OK — {count} satellites")
-            self.consoleTextEdit.append("")
-        else:
-            self._tle_overwrite_line(f"[TLE] [{'░' * W}] FAILED — check connection")
-            self.consoleTextEdit.append("")
         self._tle_progress_anchor = None
 
     def _log(self, text):
@@ -308,7 +577,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.consoleTextEdit.append("[TLE] Connecting to Celestrak...")
         self._tle_progress_anchor = None
         self._tle_loader = TLELoaderWorker()
-        self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.finished.connect(self._on_tle_loaded)
         self._tle_loader.start()
 
@@ -425,8 +693,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "\n"
                 "  ПРИМЕРЫ:\n"
                 "  sat 25544             — МКС (LEO, ~408 км)\n"
-                "  sat 28654             — GPS IIR-1 (MEO, ~20 000 км)\n"
-                "  sat 37820             — INTELSAT 33E (GEO, ~35 786 км)\n"
+                "  sat 28129             — GPS BIIR-10 (MEO, ~20 200 км)\n"
+                "  sat 36101             — Eutelsat 36B (GEO, ~35 786 км)\n"
                 "  sat STARLINK          — поиск Starlink-спутников\n"
                 "  simulate 24 1         — симуляция 24 ч, шаг 1 мин\n"
                 "  simulate 2 0.5        — симуляция 2 ч, шаг 30 с\n"
@@ -546,6 +814,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.consoleTextEdit.append(f"   {line1}")
             self.consoleTextEdit.append(f"   {line2}\n")
 
+            self.map_pic.clear_trajectory()
             self.sat_data = {
                 'norad_id': norad_id,
                 'line0':    line0,
@@ -610,6 +879,32 @@ class MainWindow(QtWidgets.QMainWindow):
                 "  simulate <h> <step> — симуляция трека (ч, мин)\n"
                 "─────────────────────────────────────────────\n"
             )
+            if norad_id == 25544:
+                from PyQt5.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat
+                cursor = self.consoleTextEdit.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                cursor.insertBlock()
+                # insert the hyperlink
+                cursor.insertHtml(
+                    "<span style='color:#00cfff;'>[ISS]</span>"
+                    "&nbsp;Live stream:&nbsp;"
+                    "<a href='https://isslivenow.com/' style='color:#44aaff;'>"
+                    "https://isslivenow.com/</a>"
+                )
+                # move to end and insert a clean block — reset ALL formatting
+                cursor.movePosition(QTextCursor.End)
+                cursor.insertBlock()
+                plain_char = QTextCharFormat()
+                plain_char.setAnchor(False)
+                plain_char.setAnchorHref("")
+                plain_char.setForeground(QtGui.QColor(168, 228, 255))  # default console colour
+                plain_char.setFontUnderline(False)
+                cursor.setCharFormat(plain_char)
+                cursor.setBlockCharFormat(plain_char)
+                cursor.insertBlock()
+                cursor.setCharFormat(plain_char)
+                cursor.setBlockCharFormat(plain_char)
+                self.consoleTextEdit.setTextCursor(cursor)
             self._log(f"Loaded satellite: {line0} (NORAD {norad_id})")
 
         except Exception as e:
@@ -796,6 +1091,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.loading_stage is not None:
             self.consoleTextEdit.append("[ERROR] Finish parameter input first\n")
             return
+        if hasattr(self, '_sim_worker') and self._sim_worker and self._sim_worker.isRunning():
+            self.consoleTextEdit.append("[SIM] Simulation already running, please wait...\n")
+            return
 
         orbit = self.sat_data.get('orbit_label', '')
         self.consoleTextEdit.append(
@@ -804,27 +1102,35 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         start_time = datetime.now(timezone.utc)
-        results, summary = simulate(
-            self.sat_data['line1'],
-            self.sat_data['line2'],
-            start_time,
-            duration_hours=duration_hours,
-            step_minutes=step_minutes,
+        self._sim_worker = SimulateWorker(
+            self.sat_data['line1'], self.sat_data['line2'],
+            start_time, duration_hours, step_minutes,
         )
+        self._sim_worker.finished.connect(
+            lambda res, summ: self._on_simulation_done(res, summ, duration_hours, step_minutes)
+        )
+        self._sim_worker.error.connect(
+            lambda e: self.consoleTextEdit.append(f"[SIM ERROR] {e}\n")
+        )
+        self._sim_worker.start()
 
+    def _on_simulation_done(self, results, summary, duration_hours, step_minutes):
         summary_text = print_simulation_summary(summary, console_output=False)
         for line in summary_text.split('\n'):
             self.consoleTextEdit.append(line)
 
         self.consoleTextEdit.append("")
 
-        if results and 'lat' in results[-1]:
+        track = [(r['lat'], r['lon']) for r in results if 'lat' in r]
+        if track:
+            self.map_pic.set_trajectory(track)
             last = results[-1]
-            self.update_satellite_marker(last['lat'], last['lon'])
-            self.consoleTextEdit.append(
-                f"[OK] Final position: LAT {last['lat']:.3f}  "
-                f"LON {last['lon']:.3f}  ALT {last['altitude_km']:.2f} km\n"
-            )
+            if 'lat' in last:
+                self.update_satellite_marker(last['lat'], last['lon'])
+                self.consoleTextEdit.append(
+                    f"[OK] Final position: LAT {last['lat']:.3f}  "
+                    f"LON {last['lon']:.3f}  ALT {last['altitude_km']:.2f} km\n"
+                )
 
         self._play_sound('sim')
         self._log(f"Simulation: {duration_hours}h step={step_minutes}min points={len(results)}")
@@ -836,28 +1142,26 @@ class MainWindow(QtWidgets.QMainWindow):
         line2 = self.sat_data.get('line2')
         if not line0 or not line1 or not line2:
             if self._vega_mode == 'delta':
-                self.Answ.setPlainText("[AI] Рекомендации недоступны: нет актуального TLE.")
+                self.Answ.setPlainText("[AI] Recommendations unavailable: no TLE loaded.")
             return
 
         if self._vega_mode == 'delta':
-            self.Answ.setPlainText("[AI] Загрузка рекомендаций для коррекции орбиты…")
+            self.Answ.setPlainText("[AI] Loading orbit correction recommendations…")
 
         self._delta_suggest_worker = DeltaSuggestWorker(line0, line1, line2)
         self._delta_suggest_worker.result_ready.connect(self._on_delta_suggestions_ready)
         self._delta_suggest_worker.start()
 
     def _on_delta_suggestions_ready(self, data):
-        """Display AI recommendations in Answ."""
+        """Save recommendations silently — shown only when user switches to delta tab."""
         self._delta_suggestions_data = data
-        if self._vega_mode == 'delta':
-            self._show_delta_suggestions()
 
     def _show_delta_suggestions(self):
         """Render saved delta suggestions into Answ."""
         data = self._delta_suggestions_data
         if data is None:
             self.Answ.setPlainText(
-                "[AI] Не удалось получить рекомендации — будут использованы только ваши значения."
+                "[AI] Could not load recommendations — your values will be used."
             )
             return
         orbit_type = data.get("orbit_type", "")
@@ -883,10 +1187,26 @@ class MainWindow(QtWidgets.QMainWindow):
             self.toggleModeButton.setText("⇄ GENERAL")
             if self._delta_suggestions_data is not None:
                 self._show_delta_suggestions()
+            elif self.sat_data:
+                # AI module unavailable — show current TLE values as reference
+                from tle_loader import parse_tle_fields
+                try:
+                    fields = parse_tle_fields(self.sat_data['line1'], self.sat_data['line2'])
+                    self.Answ.setPlainText(
+                        "[DELTA] Current TLE values (AI module unavailable):\n\n"
+                        f"Inclination:      {fields['inclination']}°\n"
+                        f"RAAN:             {fields['raan']}°\n"
+                        f"Eccentricity:     {fields['eccentricity']}\n"
+                        f"Arg. Perigee:     {fields['argument_perigee']}°\n"
+                        f"Mean Motion:      {fields['mean_motion']} rev/day\n\n"
+                        "Enter these or adjusted values when prompted."
+                    )
+                except Exception:
+                    self.Answ.setPlainText("[DELTA] Enter orbit parameters when prompted.")
             else:
                 self.Answ.setPlainText(
-                    "[AI] Рекомендуемые значения delta недоступны.\n"
-                    "Выполните команду 'delta' для их загрузки."
+                    "[AI] No satellite loaded.\n"
+                    "Use: sat <NORAD_ID>"
                 )
         else:
             self._vega_mode = 'general'
@@ -895,18 +1215,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.Answ.clear()
                 self.Answ.append(self._ai_general_text)
             else:
-                self.Answ.setPlainText("[AI] Общий анализ недоступен.")
+                self.Answ.setPlainText("[AI] General analysis not available.")
 
     def update_satellite_marker(self, lat, lon):
-        width  = self.map_pic.width()
-        height = self.map_pic.height()
-
-        # equirectangular projection
-        x = (lon + 180) / 360 * width
-        y = (90 - lat) / 180 * height
-
-        self.satPoint.move(int(x) - 5, int(y) - 5)
-        self.satPoint.show()
+        self.map_pic.set_satellite(lat, lon)
 
 
 if __name__ == "__main__":
@@ -916,13 +1228,33 @@ if __name__ == "__main__":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Sput.TLE.App")
     app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "App.ico")))
 
+    # splash screen
+    splash = SplashScreen()
+    splash.show()
+    splash.set_status("Loading TLE database")
+    app.processEvents()
+
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
 
     window = MainWindow()
-    window.show()
-    window._play_sound('start')
+    window.hide()  # keep hidden until TLE loaded
+
+    # finish splash when TLE loaded
+    def _on_splash_done(success, count):
+        splash.set_status(f"Ready — {count} satellites")
+        app.processEvents()
+        def _show_window():
+            splash.stop()
+            splash.close()
+            window.consoleTextEdit.append("[SYSTEM] Console ready")
+            window.consoleTextEdit.append("  Type 'help' for available commands\n")
+            window.show()
+            window._play_sound('start')
+        QTimer.singleShot(800, _show_window)
+
+    window._tle_loader.finished.connect(_on_splash_done)
+    splash.raise_()
 
     with loop:
-
         loop.run_forever()
