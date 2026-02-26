@@ -445,6 +445,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.consoleTextEdit.setOpenLinks(False)
         self.consoleTextEdit.anchorClicked.connect(
             lambda url: __import__("webbrowser").open(url.toString()))
+        _plain_fmt = QtGui.QTextCharFormat()
+        _plain_fmt.setAnchor(False)
+        _plain_fmt.setAnchorHref("")
+        _plain_fmt.setFontUnderline(False)
+        _plain_fmt.setForeground(QtGui.QColor(168, 228, 255))
+
+        _orig_append = self.consoleTextEdit.append
+
+        def _safe_append(text, _fmt=_plain_fmt, _orig=_orig_append):
+            self.consoleTextEdit.setCurrentCharFormat(_fmt)
+            _orig(text)
+            self.consoleTextEdit.setCurrentCharFormat(_fmt)
+
+        self.consoleTextEdit.append = _safe_append
         self.command_buffer = []
         self.sendCommandButton.clicked.connect(self.add_command_to_console)
         self.commandLineEdit.returnPressed.connect(self.add_command_to_console)
@@ -757,6 +771,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"[LIVE] Live tracking started (updates every 30s) — {orbit}\n"
                 )
                 self._play_sound('live_on')
+            return
+        # You found an easter egg, nice code check
+        if parts[0].lower() == "skis":
+            from PyQt5.QtGui import QTextCursor
+            cursor = self.consoleTextEdit.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertBlock()
+            cursor.insertHtml(
+                "<span style='color:#00cfff;'>[SKIS]</span>"
+                "&nbsp;Oh, you found some easter egg! It's a site one of the developer:&nbsp;"
+                "<a href='https://skillichse.github.io/portfolio/' style='color:#44aaff;'>"
+                "https://skillichse.github.io/portfolio/</a>"
+            )
+            self.consoleTextEdit.setTextCursor(cursor)
+            self.consoleTextEdit.append("")
             return
 
         self.command_buffer.append(command)
