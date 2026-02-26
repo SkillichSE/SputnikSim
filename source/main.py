@@ -445,8 +445,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.consoleTextEdit.setOpenLinks(False)
         self.consoleTextEdit.anchorClicked.connect(
             lambda url: __import__("webbrowser").open(url.toString()))
-
-        # ── patch append() so it ALWAYS resets link/underline formatting ──────
         _plain_fmt = QtGui.QTextCharFormat()
         _plain_fmt.setAnchor(False)
         _plain_fmt.setAnchorHref("")
@@ -454,12 +452,13 @@ class MainWindow(QtWidgets.QMainWindow):
         _plain_fmt.setForeground(QtGui.QColor(168, 228, 255))
 
         _orig_append = self.consoleTextEdit.append
+
         def _safe_append(text, _fmt=_plain_fmt, _orig=_orig_append):
             self.consoleTextEdit.setCurrentCharFormat(_fmt)
             _orig(text)
             self.consoleTextEdit.setCurrentCharFormat(_fmt)
+
         self.consoleTextEdit.append = _safe_append
-        # ─────────────────────────────────────────────────────────────────────
         self.command_buffer = []
         self.sendCommandButton.clicked.connect(self.add_command_to_console)
         self.commandLineEdit.returnPressed.connect(self.add_command_to_console)
@@ -499,6 +498,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._tle_loader = TLELoaderWorker()
         self._tle_loader.finished.connect(self._on_tle_loaded)
+        self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.start()
 
         self._delta_suggest_worker = None
@@ -545,6 +545,35 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_tle_loaded(self, success, count):
         self._tle_progress_anchor = None
+        if success:
+            self.consoleTextEdit.append(f"[TLE] Done — {count} satellites loaded\n")
+        else:
+            self.consoleTextEdit.append("[TLE] Failed to load from Celestrak\n")
+
+    def _on_tle_progress(self, downloaded, total):
+        if total > 0:
+            pct = int(downloaded / total * 100)
+            bar_filled = int(pct / 5)
+            bar = '█' * bar_filled + '░' * (20 - bar_filled)
+            mb = downloaded / 1_048_576
+            line = f"[TLE] Downloading... [{bar}] {pct}%  ({mb:.1f} MB)"
+        else:
+            kb = downloaded / 1024
+            line = f"[TLE] Downloading... {kb:.0f} KB"
+
+        doc = self.consoleTextEdit.document()
+        last_text = doc.lastBlock().text()
+        cursor = self.consoleTextEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        if last_text.startswith("[TLE] Download"):
+            cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
+            cursor.movePosition(QtGui.QTextCursor.EndOfBlock, QtGui.QTextCursor.KeepAnchor)
+            cursor.insertText(line)
+        else:
+            cursor.insertBlock()
+            cursor.insertText(line)
+        self.consoleTextEdit.setTextCursor(cursor)
+        self.consoleTextEdit.ensureCursorVisible()
 
     def _log(self, text):
         try:
@@ -582,8 +611,42 @@ class MainWindow(QtWidgets.QMainWindow):
         if norad_id is None:
             self.consoleTextEdit.append("[ERROR] Cannot reset — satellite loaded by index, use sat <NORAD_ID>\n")
             return
-        self.consoleTextEdit.append(f"[RESET] Reloading NORAD {norad_id} with original parameters...\n")
-        self.load_satellite_by_norad_id(norad_id)
+
+        line2_orig = self.sat_data.get('line2_orig')
+        if line2_orig and line2_orig != self.sat_data.get('line2'):
+            # restore original TLE in-place without re-fetching from disk
+            self.sat_data['line2'] = line2_orig
+            self.sat_data['deltas'] = {}
+            line0 = self.sat_data['line0']
+            line1 = self.sat_data['line1']
+
+            fields = parse_tle_fields(line1, line2_orig)
+            self._populate_ui_fields(line0, fields)
+
+            # recompute position from original TLE
+            try:
+                _sat = Satrec.twoline2rv(line1, line2_orig)
+                _now = datetime.now(timezone.utc)
+                _jd, _fr = jday(_now.year, _now.month, _now.day,
+                                _now.hour, _now.minute, _now.second)
+                _err, _r, _ = _sat.sgp4(_jd, _fr)
+                if _err == 0:
+                    _r = np.array(_r)
+                    _ecef = teme_to_ecef(_r, _jd + _fr)
+                    _lat, _lon = ecef_to_latlon(_ecef)
+                    self.map_pic.clear_trajectory()
+                    self.update_satellite_marker(_lat, _lon)
+                    self.consoleTextEdit.append(
+                        f"[RESET] Restored original TLE for NORAD {norad_id}\n"
+                        f"[POS] LAT {_lat:+.3f}  LON {_lon:+.3f}\n"
+                    )
+            except Exception:
+                self.consoleTextEdit.append(f"[RESET] Parameters restored for NORAD {norad_id}\n")
+
+            self._write_tle_for_ai(line0, line1, line2_orig)
+            self._run_ai_analysis()
+        else:
+            self.consoleTextEdit.append(f"[RESET] No changes to reset for NORAD {norad_id}\n")
 
     def _reload_tle(self):
         if hasattr(self, '_tle_loader') and self._tle_loader.isRunning():
@@ -593,6 +656,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tle_progress_anchor = None
         self._tle_loader = TLELoaderWorker()
         self._tle_loader.finished.connect(self._on_tle_loaded)
+        self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.start()
 
     def _on_sound_toggle(self, checked):
@@ -773,7 +837,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 self._play_sound('live_on')
             return
-
+        # You found an easter egg, nice code check
         if parts[0].lower() == "skis":
             from PyQt5.QtGui import QTextCursor
             cursor = self.consoleTextEdit.textCursor()
@@ -788,7 +852,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.consoleTextEdit.setTextCursor(cursor)
             self.consoleTextEdit.append("")
             return
-            
+
         self.command_buffer.append(command)
 
     def search_satellite_by_name(self, query):
@@ -846,11 +910,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self.map_pic.clear_trajectory()
             self.sat_data = {
-                'norad_id': norad_id,
-                'line0':    line0,
-                'line1':    line1,
-                'line2':    line2,
-                'deltas':   {},
+                'norad_id':    norad_id,
+                'line0':       line0,
+                'line1':       line1,
+                'line2':       line2,
+                'line2_orig':  line2,  # preserve original for reset
+                'deltas':      {},
             }
 
             fields = parse_tle_fields(line1, line2)
@@ -910,18 +975,31 @@ class MainWindow(QtWidgets.QMainWindow):
                 "─────────────────────────────────────────────\n"
             )
             if norad_id == 25544:
-                from PyQt5.QtGui import QTextCursor
+                from PyQt5.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat
                 cursor = self.consoleTextEdit.textCursor()
                 cursor.movePosition(QTextCursor.End)
                 cursor.insertBlock()
+                # insert the hyperlink
                 cursor.insertHtml(
                     "<span style='color:#00cfff;'>[ISS]</span>"
                     "&nbsp;Live stream:&nbsp;"
                     "<a href='https://isslivenow.com/' style='color:#44aaff;'>"
                     "https://isslivenow.com/</a>"
                 )
+                # move to end and insert a clean block — reset ALL formatting
+                cursor.movePosition(QTextCursor.End)
+                cursor.insertBlock()
+                plain_char = QTextCharFormat()
+                plain_char.setAnchor(False)
+                plain_char.setAnchorHref("")
+                plain_char.setForeground(QtGui.QColor(168, 228, 255))  # default console colour
+                plain_char.setFontUnderline(False)
+                cursor.setCharFormat(plain_char)
+                cursor.setBlockCharFormat(plain_char)
+                cursor.insertBlock()
+                cursor.setCharFormat(plain_char)
+                cursor.setBlockCharFormat(plain_char)
                 self.consoleTextEdit.setTextCursor(cursor)
-                self.consoleTextEdit.append("")
             self._log(f"Loaded satellite: {line0} (NORAD {norad_id})")
 
         except Exception as e:
