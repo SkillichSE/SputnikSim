@@ -924,4 +924,5 @@ if __name__ == "__main__":
     window._play_sound('start')
 
     with loop:
+
         loop.run_forever()
