@@ -1,8 +1,8 @@
 
-# Directory
+# Пути
 
-- Technical documentation: https://github.com/SkillichSE/SputnikSim/blob/main/tech_doc/tech_doc.pdf
-- Pitch deck: https://github.com/SkillichSE/SputnikSim/blob/main/pitch_deck/pitch_deck.pdf
+- Техническая документация: https://github.com/SkillichSE/SputnikSim/blob/main/tech_doc/tech_doc.pdf
+- Презентация: https://github.com/SkillichSE/SputnikSim/blob/main/pitch_deck/pitch_deck.pdf
 - Source: https://github.com/SkillichSE/SputnikSim/tree/main/source
 
 # Установка
