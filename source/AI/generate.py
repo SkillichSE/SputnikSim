@@ -577,11 +577,9 @@ if __name__ == "__main__":
 
 def compute_recommended_orbit_params(tle_struct):
     """
-    Return recommended orbital parameters based on orbit type.
+    Return recommended orbital parameters + analysis context.
     Used by DeltaSuggestWorker in main.py.
     """
-    from parse_tle import get_orbit_type, calculate_semi_major_axis, calculate_orbital_period
-
     inclination  = tle_struct.get("inclination", 0)
     mean_motion  = tle_struct.get("mean_motion", 0)
     eccentricity = tle_struct.get("eccentricity", 0)
@@ -591,35 +589,65 @@ def compute_recommended_orbit_params(tle_struct):
     orbit_type = get_orbit_type(mean_motion, inclination, eccentricity)
     ref = _ref(orbit_type)
 
-    # recommended inclination
+    sma      = calculate_semi_major_axis(mean_motion)
+    altitude = sma - EARTH_RADIUS
+
     if orbit_type == "SSO":
-        rec_incl = _sso_target_inclination(mean_motion)
+        rec_incl        = _sso_target_inclination(mean_motion)
+        incl_note       = f"SSO target for {altitude:.0f} km"
+        incl_actionable = abs(inclination - rec_incl) > 0.1
     elif ref["incl_ideal"] is not None:
-        rec_incl = ref["incl_ideal"]
+        rec_incl        = ref["incl_ideal"]
+        incl_note       = f"ideal for {orbit_type}"
+        incl_actionable = abs(inclination - rec_incl) > (ref["incl_warn"] or 0.1)
     else:
-        rec_incl = inclination  # no correction needed for this type
+        rec_incl        = inclination
+        incl_note       = "no standard target for this orbit type"
+        incl_actionable = False
 
-    # recommended eccentricity — circular orbit is ideal for most types
     if orbit_type == "HEO":
-        rec_ecc = eccentricity  # HEO keeps its eccentricity by design
+        rec_ecc        = eccentricity
+        ecc_note       = "HEO eccentricity maintained by design"
+        ecc_actionable = False
     else:
-        rec_ecc = 0.0  # circular
+        rec_ecc        = 0.0
+        ecc_note       = "circular orbit target"
+        ecc_actionable = eccentricity > (ref["ecc_warn"] or 0.001)
 
-    # recommended mean motion — keep current unless GEO/GSO drift
     if orbit_type in ("GEO", "GSO"):
-        rec_mm = ref["mm_ideal"]  # exactly 1.0 rev/day
+        rec_mm        = ref["mm_ideal"]
+        mm_note       = "geosynchronous period"
+        mm_actionable = abs(mean_motion - rec_mm) > (ref["mm_tol"] or 0.01)
     else:
-        rec_mm = mean_motion
+        rec_mm        = mean_motion
+        mm_note       = "current value nominal"
+        mm_actionable = False
 
-    # RAAN and arg_perigee — no universal ideal, keep current
-    rec_raan = raan
-    rec_arg  = arg_perigee
+    station = assess_station_keeping(inclination, eccentricity, mean_motion, orbit_type)
+    fuel    = calculate_delta_v_budget(inclination, eccentricity, mean_motion, orbit_type)
+
+    def _status(actionable):
+        return "needs correction" if actionable else "optimal"
 
     return {
-        "orbit_type":        orbit_type,
-        "inclination":       rec_incl,
-        "raan":              rec_raan,
-        "eccentricity":      rec_ecc,
-        "argument_perigee":  rec_arg,
-        "mean_motion":       rec_mm,
+        "orbit_type":       orbit_type,
+        "altitude_km":      round(altitude, 1),
+        "inclination":      rec_incl,
+        "raan":             raan,
+        "eccentricity":     rec_ecc,
+        "argument_perigee": arg_perigee,
+        "mean_motion":      rec_mm,
+        "incl_note":        incl_note,
+        "ecc_note":         ecc_note,
+        "mm_note":          mm_note,
+        "incl_status":      _status(incl_actionable),
+        "ecc_status":       _status(ecc_actionable),
+        "mm_status":        _status(mm_actionable),
+        "urgency":          station["urgency"],
+        "recommendations":  station["recommendations"],
+        "total_delta_v":    round(fuel["total_delta_v"], 2),
+        "budget_status":    fuel["budget_status"],
+        "dv_inclination":   round(fuel["breakdown"]["inclination_correction"], 2),
+        "dv_eccentricity":  round(fuel["breakdown"]["eccentricity_correction"], 2),
+        "dv_drift":         round(fuel["breakdown"]["drift_correction"], 2),
     }

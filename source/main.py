@@ -498,7 +498,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._tle_loader = TLELoaderWorker()
         self._tle_loader.finished.connect(self._on_tle_loaded)
-        self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.start()
 
         self._delta_suggest_worker = None
@@ -545,35 +544,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_tle_loaded(self, success, count):
         self._tle_progress_anchor = None
-        if success:
-            self.consoleTextEdit.append(f"[TLE] Done — {count} satellites loaded\n")
-        else:
-            self.consoleTextEdit.append("[TLE] Failed to load from Celestrak\n")
-
-    def _on_tle_progress(self, downloaded, total):
-        if total > 0:
-            pct = int(downloaded / total * 100)
-            bar_filled = int(pct / 5)
-            bar = '█' * bar_filled + '░' * (20 - bar_filled)
-            mb = downloaded / 1_048_576
-            line = f"[TLE] Downloading... [{bar}] {pct}%  ({mb:.1f} MB)"
-        else:
-            kb = downloaded / 1024
-            line = f"[TLE] Downloading... {kb:.0f} KB"
-
-        doc = self.consoleTextEdit.document()
-        last_text = doc.lastBlock().text()
-        cursor = self.consoleTextEdit.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        if last_text.startswith("[TLE] Download"):
-            cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
-            cursor.movePosition(QtGui.QTextCursor.EndOfBlock, QtGui.QTextCursor.KeepAnchor)
-            cursor.insertText(line)
-        else:
-            cursor.insertBlock()
-            cursor.insertText(line)
-        self.consoleTextEdit.setTextCursor(cursor)
-        self.consoleTextEdit.ensureCursorVisible()
 
     def _log(self, text):
         try:
@@ -611,42 +581,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if norad_id is None:
             self.consoleTextEdit.append("[ERROR] Cannot reset — satellite loaded by index, use sat <NORAD_ID>\n")
             return
-
-        line2_orig = self.sat_data.get('line2_orig')
-        if line2_orig and line2_orig != self.sat_data.get('line2'):
-            # restore original TLE in-place without re-fetching from disk
-            self.sat_data['line2'] = line2_orig
-            self.sat_data['deltas'] = {}
-            line0 = self.sat_data['line0']
-            line1 = self.sat_data['line1']
-
-            fields = parse_tle_fields(line1, line2_orig)
-            self._populate_ui_fields(line0, fields)
-
-            # recompute position from original TLE
-            try:
-                _sat = Satrec.twoline2rv(line1, line2_orig)
-                _now = datetime.now(timezone.utc)
-                _jd, _fr = jday(_now.year, _now.month, _now.day,
-                                _now.hour, _now.minute, _now.second)
-                _err, _r, _ = _sat.sgp4(_jd, _fr)
-                if _err == 0:
-                    _r = np.array(_r)
-                    _ecef = teme_to_ecef(_r, _jd + _fr)
-                    _lat, _lon = ecef_to_latlon(_ecef)
-                    self.map_pic.clear_trajectory()
-                    self.update_satellite_marker(_lat, _lon)
-                    self.consoleTextEdit.append(
-                        f"[RESET] Restored original TLE for NORAD {norad_id}\n"
-                        f"[POS] LAT {_lat:+.3f}  LON {_lon:+.3f}\n"
-                    )
-            except Exception:
-                self.consoleTextEdit.append(f"[RESET] Parameters restored for NORAD {norad_id}\n")
-
-            self._write_tle_for_ai(line0, line1, line2_orig)
-            self._run_ai_analysis()
-        else:
-            self.consoleTextEdit.append(f"[RESET] No changes to reset for NORAD {norad_id}\n")
+        self.consoleTextEdit.append(f"[RESET] Reloading NORAD {norad_id} with original parameters...\n")
+        self.load_satellite_by_norad_id(norad_id)
 
     def _reload_tle(self):
         if hasattr(self, '_tle_loader') and self._tle_loader.isRunning():
@@ -656,7 +592,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tle_progress_anchor = None
         self._tle_loader = TLELoaderWorker()
         self._tle_loader.finished.connect(self._on_tle_loaded)
-        self._tle_loader.progress.connect(self._on_tle_progress)
         self._tle_loader.start()
 
     def _on_sound_toggle(self, checked):
@@ -910,12 +845,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self.map_pic.clear_trajectory()
             self.sat_data = {
-                'norad_id':    norad_id,
-                'line0':       line0,
-                'line1':       line1,
-                'line2':       line2,
-                'line2_orig':  line2,  # preserve original for reset
-                'deltas':      {},
+                'norad_id': norad_id,
+                'line0':    line0,
+                'line1':    line1,
+                'line2':    line2,
+                'deltas':   {},
             }
 
             fields = parse_tle_fields(line1, line2)
@@ -1255,20 +1189,92 @@ class MainWindow(QtWidgets.QMainWindow):
         """Render saved delta suggestions into Answ."""
         data = self._delta_suggestions_data
         if data is None:
-            self.Answ.setPlainText(
-                "[AI] Could not load recommendations — your values will be used."
-            )
+            self.Answ.setPlainText("[AI] Could not load recommendations.")
             return
-        orbit_type = data.get("orbit_type", "")
-        ecc = max(0.0, float(data.get("eccentricity", 0)))
-        self.Answ.setPlainText(
-            f"[AI] Рекомендуемые параметры орбиты ({orbit_type}):\n\n"
-            f"Inclination:      {data.get('inclination', 0):.4f}°\n"
-            f"RAAN:             {data.get('raan', 0):.4f}°\n"
-            f"Eccentricity:     {ecc:.6f}\n"
-            f"Arg. Perigee:     {data.get('argument_perigee', 0):.4f}°\n"
-            f"Mean Motion:      {data.get('mean_motion', 0):.8f} rev/day\n\n"
-        )
+
+        orbit_type = data.get("orbit_type", "?")
+        altitude   = data.get("altitude_km", 0)
+        urgency    = data.get("urgency", "—")
+
+        rec_incl = float(data.get("inclination", 0))
+        rec_raan = float(data.get("raan", 0))
+        rec_ecc  = float(data.get("eccentricity", 0))
+        rec_arg  = float(data.get("argument_perigee", 0))
+        rec_mm   = float(data.get("mean_motion", 0))
+
+        # current values for diff
+        cur_incl = cur_raan = cur_ecc = cur_arg = cur_mm = None
+        if self.sat_data:
+            try:
+                f = parse_tle_fields(self.sat_data['line1'], self.sat_data['line2'])
+                cur_incl = float(f['inclination'])
+                cur_raan = float(f['raan'])
+                ecc_str  = f['eccentricity']
+                cur_ecc  = float(ecc_str) if '.' in ecc_str else float("0." + ecc_str)
+                cur_arg  = float(f['argument_perigee'])
+                cur_mm   = float(f['mean_motion'])
+            except Exception:
+                pass
+
+        def _diff(rec, cur, decimals=4, unit="°"):
+            if cur is None:
+                return ""
+            d = rec - cur
+            if abs(d) < 10**(-decimals):
+                return "  ✓"
+            return f"  ({'+' if d>0 else ''}{d:.{decimals}f}{unit})"
+
+        def _tag(key):
+            s = data.get(key, "")
+            return " ⚠" if s == "needs correction" else ""
+
+        lines = [
+            f"[AI] Recommended — {orbit_type}  |  alt: {altitude:.0f} km",
+            f"     Urgency: {urgency}",
+            "",
+            f"  Inclination   {rec_incl:>12.4f}°{_diff(rec_incl, cur_incl)}{_tag('incl_status')}",
+            f"  RAAN          {rec_raan:>12.4f}°{_diff(rec_raan, cur_raan)}",
+            f"  Eccentricity  {rec_ecc:>12.6f}{_diff(rec_ecc, cur_ecc, 6, '')}",
+            f"  Arg. Perigee  {rec_arg:>12.4f}°{_diff(rec_arg, cur_arg)}",
+            f"  Mean Motion   {rec_mm:>14.8f}{_diff(rec_mm, cur_mm, 6, '')} rev/day{_tag('mm_status')}",
+            "",
+        ]
+
+        # station-keeping recommendations (translated from Russian inline)
+        recs = data.get("recommendations", [])
+        _ru_to_en = {
+            "Орбита стабильна": "Orbit stable — no correction required.",
+            "North-South":      "North-South correction recommended.",
+            "East-West":        "East-West correction recommended.",
+            "циркуляризации":   "Circularisation manoeuvre recommended.",
+            "Дрейф":            "Longitude drift detected.",
+            "Наклонение":       "Inclination deviation detected.",
+            "Эксцентриситет":   "Eccentricity out of tolerance.",
+        }
+        for rec in recs:
+            translated = rec
+            for ru, en in _ru_to_en.items():
+                if ru in rec:
+                    translated = en
+                    break
+            lines.append(f"  {translated}")
+
+        if recs:
+            lines.append("")
+
+        # delta-v budget
+        dv_total = data.get("total_delta_v", 0)
+        dv_status = data.get("budget_status", "")
+        lines += [
+            f"  Delta-V budget: {dv_total:.2f} m/s  ({dv_status})",
+            f"    Inclination:  {data.get('dv_inclination', 0):.2f} m/s",
+            f"    Eccentricity: {data.get('dv_eccentricity', 0):.2f} m/s",
+            f"    Drift:        {data.get('dv_drift', 0):.2f} m/s",
+            "",
+            "  Use 'delta' to apply recommended values.",
+        ]
+
+        self.Answ.setPlainText("\n".join(lines))
 
     def _ai_helper_resize(self, event):
         """Keep the toggle button pinned to the right of the GroupBox title on resize."""
