@@ -574,3 +574,52 @@ if __name__ == "__main__":
         threshold=0.10,
     )
     print(text)
+
+def compute_recommended_orbit_params(tle_struct):
+    """
+    Return recommended orbital parameters based on orbit type.
+    Used by DeltaSuggestWorker in main.py.
+    """
+    from parse_tle import get_orbit_type, calculate_semi_major_axis, calculate_orbital_period
+
+    inclination  = tle_struct.get("inclination", 0)
+    mean_motion  = tle_struct.get("mean_motion", 0)
+    eccentricity = tle_struct.get("eccentricity", 0)
+    raan         = tle_struct.get("raan", 0)
+    arg_perigee  = tle_struct.get("argument_perigee", 0)
+
+    orbit_type = get_orbit_type(mean_motion, inclination, eccentricity)
+    ref = _ref(orbit_type)
+
+    # recommended inclination
+    if orbit_type == "SSO":
+        rec_incl = _sso_target_inclination(mean_motion)
+    elif ref["incl_ideal"] is not None:
+        rec_incl = ref["incl_ideal"]
+    else:
+        rec_incl = inclination  # no correction needed for this type
+
+    # recommended eccentricity — circular orbit is ideal for most types
+    if orbit_type == "HEO":
+        rec_ecc = eccentricity  # HEO keeps its eccentricity by design
+    else:
+        rec_ecc = 0.0  # circular
+
+    # recommended mean motion — keep current unless GEO/GSO drift
+    if orbit_type in ("GEO", "GSO"):
+        rec_mm = ref["mm_ideal"]  # exactly 1.0 rev/day
+    else:
+        rec_mm = mean_motion
+
+    # RAAN and arg_perigee — no universal ideal, keep current
+    rec_raan = raan
+    rec_arg  = arg_perigee
+
+    return {
+        "orbit_type":        orbit_type,
+        "inclination":       rec_incl,
+        "raan":              rec_raan,
+        "eccentricity":      rec_ecc,
+        "argument_perigee":  rec_arg,
+        "mean_motion":       rec_mm,
+    }
