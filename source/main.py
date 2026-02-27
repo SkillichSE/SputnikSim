@@ -1171,11 +1171,11 @@ class MainWindow(QtWidgets.QMainWindow):
         line2 = self.sat_data.get('line2')
         if not line0 or not line1 or not line2:
             if self._vega_mode == 'delta':
-                self.Answ.setPlainText("[AI] Recommendations unavailable: no TLE loaded.")
+                self.Answ.setPlainText("No satellite loaded.")
             return
 
         if self._vega_mode == 'delta':
-            self.Answ.setPlainText("[AI] Loading orbit correction recommendations…")
+            self.Answ.setPlainText("Computing orbital corrections…")
 
         self._delta_suggest_worker = DeltaSuggestWorker(line0, line1, line2)
         self._delta_suggest_worker.result_ready.connect(self._on_delta_suggestions_ready)
@@ -1189,7 +1189,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Render saved delta suggestions into Answ."""
         data = self._delta_suggestions_data
         if data is None:
-            self.Answ.setPlainText("[AI] Could not load recommendations.")
+            self.Answ.setPlainText("Could not compute corrections.")
             return
 
         orbit_type = data.get("orbit_type", "?")
@@ -1229,7 +1229,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return " ⚠" if s == "needs correction" else ""
 
         lines = [
-            f"[AI] Recommended — {orbit_type}  |  alt: {altitude:.0f} km",
+            f"Orbital Corrections  —  {orbit_type}  |  alt: {altitude:.0f} km",
             f"     Urgency: {urgency}",
             "",
             f"  Inclination   {rec_incl:>12.4f}°{_diff(rec_incl, cur_incl)}{_tag('incl_status')}",
@@ -1271,7 +1271,7 @@ class MainWindow(QtWidgets.QMainWindow):
             f"    Eccentricity: {data.get('dv_eccentricity', 0):.2f} m/s",
             f"    Drift:        {data.get('dv_drift', 0):.2f} m/s",
             "",
-            "  Use 'delta' to apply recommended values.",
+            "  Type 'delta' to apply these values.",
         ]
 
         self.Answ.setPlainText("\n".join(lines))
