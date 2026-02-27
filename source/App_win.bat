@@ -32,7 +32,7 @@ if not exist venv (
 call venv\Scripts\activate
 
 if not exist venv\Lib\site-packages\PyQt5 (
-    echo  [SETUP] Installing dependencies — this may take 2-5 minutes...
+    echo  [SETUP] Installing dependencies — this may take a while...
     echo.
     python -m pip install --upgrade pip -q
     pip install -r requirements.txt -q
@@ -60,3 +60,4 @@ echo.
 echo  ════════════════════════════════════════════════════════════════════════════════
 echo  [SYS]   Session ended.
 pause
+
