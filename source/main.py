@@ -471,6 +471,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.loading_stage      = None
         self.sat_data           = {}
         self._ai_worker         = None
+        self._sim_worker        = None
+        self._sim_workers       = []
 
         self._live_timer = QTimer()
         self._live_timer.setInterval(30000)
@@ -694,9 +696,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if parts[0].lower() == "help":
             self.consoleTextEdit.append(
-                "\n══════════════════════════════════════════════\n"
-                "  ДОСТУПНЫЕ КОМАНДЫ\n"
-                "══════════════════════════════════════════════\n"
+                "\nДОСТУПНЫЕ КОМАНДЫ\n"
+                "\n"
                 "  sat <NORAD_ID>        — загрузить спутник по номеру\n"
                 "  sat <имя>             — поиск спутника по имени\n"
                 "  delta                 — изменить параметры орбиты\n"
@@ -712,7 +713,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "  sat STARLINK          — поиск Starlink-спутников\n"
                 "  simulate 24 1         — симуляция 24 ч, шаг 1 мин\n"
                 "  simulate 2 0.5        — симуляция 2 ч, шаг 30 с\n"
-                "══════════════════════════════════════════════\n"
+                "\n"
             )
             return
 
@@ -902,11 +903,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
 
             self.consoleTextEdit.append(
-                "─────────────────────────────────────────────\n"
-                "  delta               — изменить параметры орбиты\n"
+                "\n  delta               — изменить параметры орбиты\n"
                 "  live                — включить/выключить отслеживание (30 с)\n"
                 "  simulate <h> <step> — симуляция трека (ч, мин)\n"
-                "─────────────────────────────────────────────\n"
+                "\n"
             )
             if norad_id == 25544:
                 from PyQt5.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat
@@ -987,11 +987,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_live_position()
 
             self.consoleTextEdit.append(
-                "─────────────────────────────────────────────\n"
-                "  delta               — изменить параметры орбиты\n"
+                "\n  delta               — изменить параметры орбиты\n"
                 "  live                — включить/выключить отслеживание (30 с)\n"
                 "  simulate <h> <step> — симуляция трека (ч, мин)\n"
-                "─────────────────────────────────────────────\n"
+                "\n"
             )
             self._log(f"Loaded satellite: {line0.strip()}")
 
@@ -1131,17 +1130,20 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         start_time = datetime.now(timezone.utc)
-        self._sim_worker = SimulateWorker(
+        w = SimulateWorker(
             self.sat_data['line1'], self.sat_data['line2'],
             start_time, duration_hours, step_minutes,
         )
-        self._sim_worker.result_ready.connect(
+        self._sim_worker = w
+        self._sim_workers.append(w)
+        w.result_ready.connect(
             lambda res, summ: self._on_simulation_done(res, summ, duration_hours, step_minutes)
         )
-        self._sim_worker.error.connect(
+        w.error.connect(
             lambda e: self.consoleTextEdit.append(f"[SIM ERROR] {e}\n")
         )
-        self._sim_worker.start()
+        w.finished.connect(lambda _w=w: self._sim_workers.remove(_w) if _w in self._sim_workers else None)
+        w.start()
 
     def _on_simulation_done(self, results, summary, duration_hours, step_minutes):
         summary_text = print_simulation_summary(summary, console_output=False)
