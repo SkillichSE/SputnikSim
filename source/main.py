@@ -140,8 +140,8 @@ class AIWorker(QThread):
 
 class SimulateWorker(QThread):
     """Run orbit simulation in background thread."""
-    finished = pyqtSignal(object, object)  # results, summary
-    error    = pyqtSignal(str)
+    result_ready = pyqtSignal(object, object)  # results, summary
+    error        = pyqtSignal(str)
 
     def __init__(self, line1, line2, start_time, duration_hours, step_minutes):
         super().__init__()
@@ -158,7 +158,7 @@ class SimulateWorker(QThread):
                 duration_hours=self._duration_hours,
                 step_minutes=self._step_minutes,
             )
-            self.finished.emit(results, summary)
+            self.result_ready.emit(results, summary)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -1135,7 +1135,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sat_data['line1'], self.sat_data['line2'],
             start_time, duration_hours, step_minutes,
         )
-        self._sim_worker.finished.connect(
+        self._sim_worker.result_ready.connect(
             lambda res, summ: self._on_simulation_done(res, summ, duration_hours, step_minutes)
         )
         self._sim_worker.error.connect(
