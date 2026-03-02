@@ -8,20 +8,17 @@
 import sys
 import os
 import re
-import asyncio
 import json
 from datetime import datetime, timezone
 from PyQt5 import QtWidgets, QtGui, QtCore, uic
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QPointF, QRect
 from PyQt5.QtWidgets import QLabel
-from qasync import QEventLoop
 from tle_loader import save_tle, dataset_sat, parse_tle_fields, find_satellite_by_norad_id
 from sgp4_core import simulate, teme_to_ecef, ecef_to_latlon, gmst_from_jd, print_simulation_summary, EARTH_RADIUS
 from sgp4.api import Satrec, jday
 import numpy as np
 import threading
 import ctypes
-import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QFont, QRadialGradient, QBrush
 
@@ -337,12 +334,12 @@ class SplashScreen(QtWidgets.QSplashScreen):
 
         # ── title ────────────────────────────────────────────
         p.setPen(QtGui.QColor(255, 255, 255))
-        f = QtGui.QFont("Consolas", 26, QtGui.QFont.Bold)
+        f = QtGui.QFont("Courier New" if __import__("platform").system() != "Windows" else "Consolas", 26, QtGui.QFont.Bold)
         p.setFont(f)
         p.drawText(QtCore.QRect(0, H - 95, W, 36), Qt.AlignCenter, "SputnikSim")
 
         p.setPen(QtGui.QColor(80, 160, 255))
-        f2 = QtGui.QFont("Consolas", 9)
+        f2 = QtGui.QFont("Courier New" if __import__("platform").system() != "Windows" else "Consolas", 9)
         p.setFont(f2)
         p.drawText(QtCore.QRect(0, H - 62, W, 20), Qt.AlignCenter,
                    "Satellite Orbit Analysis & Simulation System")
@@ -370,7 +367,7 @@ class SplashScreen(QtWidgets.QSplashScreen):
 
         # status text (no dots — static)
         p.setPen(QtGui.QColor(140, 200, 100))
-        f3 = QtGui.QFont("Consolas", 8)
+        f3 = QtGui.QFont("Courier New" if __import__("platform").system() != "Windows" else "Consolas", 8)
         p.setFont(f3)
         p.drawText(QtCore.QRect(0, H - 18, W, 16), Qt.AlignCenter, self._status)
 
@@ -406,28 +403,22 @@ class MapWidget(QLabel):
         self.update()
 
     def _map_rect(self):
-        """Return (ox, oy, w, h) of map area preserving 2:1 aspect ratio."""
+        """Return (ox, oy, mw, mh) preserving 2:1 map aspect ratio."""
         w, h = self.width(), self.height()
-        mw = h * 2
-        mh = h
+        mw, mh = h * 2, h
         if mw > w:
-            mw = w
-            mh = w // 2
+            mw, mh = w, max(1, w // 2)
         ox = (w - mw) // 2
         oy = (h - mh) // 2
         return ox, oy, mw, mh
 
     def _to_xy(self, lat, lon):
         ox, oy, mw, mh = self._map_rect()
-        x = ox + int((lon + 180) / 360 * mw)
-        y = oy + int((90 - lat) / 180 * mh)
-        return x, y
+        return ox + int((lon + 180) / 360 * mw), oy + int((90 - lat) / 180 * mh)
 
     def paintEvent(self, event):
-        from PyQt5.QtCore import QRect
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-
         px = self.pixmap()
         if px and not px.isNull():
             ox, oy, mw, mh = self._map_rect()
@@ -447,6 +438,14 @@ class MapWidget(QLabel):
         if self._sat_pos:
             lat, lon = self._sat_pos
             x, y = self._to_xy(lat, lon)
+            painter.setPen(QPen(QColor(255, 50, 50), 2))
+            painter.setBrush(QColor(255, 50, 50))
+            painter.drawEllipse(x - 6, y - 6, 12, 12)
+
+        painter.end()
+
+
+class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         uic.loadUi("main.ui", self)
@@ -629,10 +628,20 @@ class MapWidget(QLabel):
         def _beep():
             try:
                 import platform
-                if platform.system() == 'Windows':
+                _sys = platform.system()
+                if _sys == 'Windows':
                     import winsound
                     for freq, dur in sequence:
                         winsound.Beep(freq, dur)
+                elif _sys == 'Darwin':  # macOS
+                    import subprocess
+                    subprocess.run(['afplay', '/System/Library/Sounds/Tink.aiff'],
+                                   capture_output=True)
+                elif _sys == 'Linux':
+                    import subprocess
+                    for freq, dur in sequence:
+                        subprocess.run(['beep', '-f', str(freq), '-l', str(dur)],
+                                       capture_output=True)
             except Exception:
                 pass
 
@@ -804,7 +813,8 @@ class MapWidget(QLabel):
 
     def search_satellite_by_name(self, query):
         try:
-            with open("data.json", "r", encoding="utf-8") as f:
+            _db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
+            with open(_db, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
             self.consoleTextEdit.append(f"[ERROR] Cannot read TLE database: {e}\n")
@@ -1081,7 +1091,7 @@ class MapWidget(QLabel):
             # try to persist updated TLE back into data.json so that
             # subsequent loads of this satellite see the new line 2
             try:
-                db_path = os.path.join("data.json")
+                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
                 if os.path.exists(db_path):
                     with open(db_path, "r", encoding="utf-8") as f:
                         db_data = json.load(f)
@@ -1336,10 +1346,15 @@ class MapWidget(QLabel):
 
 
 if __name__ == "__main__":
+    # Ensure cwd is the script directory so data.json/map.jpg are found
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     app  = QtWidgets.QApplication(sys.argv)
     import platform
     if platform.system() == 'Windows':
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Sput.TLE.App")
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Sput.TLE.App")
+        except Exception:
+            pass
     app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "App.ico")))
 
     # splash screen
@@ -1347,9 +1362,6 @@ if __name__ == "__main__":
     splash.show()
     splash.set_status("Loading TLE database")
     app.processEvents()
-
-    loop = QEventLoop(app)
-    asyncio.set_event_loop(loop)
 
     window = MainWindow()
     window.hide()  # keep hidden until TLE loaded
