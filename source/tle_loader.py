@@ -26,7 +26,8 @@ def save_tle(progress_callback=None):
         raw = b"".join(chunks).decode("utf-8")
         # strip() removes \r
         data = [line.strip() for line in raw.splitlines() if line.strip()]
-        with open("data.json", "w", encoding="utf-8") as file:
+        _db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
+        with open(_db, "w", encoding="utf-8") as file:
             json.dump(data, file)
         return len(data) // 3
     except Exception as e:
@@ -35,7 +36,8 @@ def save_tle(progress_callback=None):
 
 def dataset_sat(number_sat):
 
-    with open("data.json", "r", encoding="utf-8") as file:
+    _db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
+    with open(_db, "r", encoding="utf-8") as file:
         data = json.load(file)
 
     tle_text = []
@@ -60,7 +62,7 @@ def dataset_sat(number_sat):
 def find_satellite_by_norad_id(norad_id):
 
     try:
-        with open("data.json", "r", encoding="utf-8") as file:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json"), "r", encoding="utf-8") as file:
             data = json.load(file)
     except Exception as e:
         print(f"Error reading data.json: {e}")
