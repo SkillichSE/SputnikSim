@@ -405,14 +405,33 @@ class MapWidget(QLabel):
         self._trajectory = []
         self.update()
 
-    def _to_xy(self, lat, lon):
+    def _map_rect(self):
+        """Return (ox, oy, w, h) of map area preserving 2:1 aspect ratio."""
         w, h = self.width(), self.height()
-        return int((lon + 180) / 360 * w), int((90 - lat) / 180 * h)
+        mw = h * 2
+        mh = h
+        if mw > w:
+            mw = w
+            mh = w // 2
+        ox = (w - mw) // 2
+        oy = (h - mh) // 2
+        return ox, oy, mw, mh
+
+    def _to_xy(self, lat, lon):
+        ox, oy, mw, mh = self._map_rect()
+        x = ox + int((lon + 180) / 360 * mw)
+        y = oy + int((90 - lat) / 180 * mh)
+        return x, y
 
     def paintEvent(self, event):
-        super().paintEvent(event)
+        from PyQt5.QtCore import QRect
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+
+        px = self.pixmap()
+        if px and not px.isNull():
+            ox, oy, mw, mh = self._map_rect()
+            painter.drawPixmap(QRect(ox, oy, mw, mh), px)
 
         if len(self._trajectory) >= 2:
             pen = QPen(QColor(0, 180, 255, 200))
@@ -428,14 +447,6 @@ class MapWidget(QLabel):
         if self._sat_pos:
             lat, lon = self._sat_pos
             x, y = self._to_xy(lat, lon)
-            painter.setPen(QPen(QColor(255, 50, 50), 2))
-            painter.setBrush(QColor(255, 50, 50))
-            painter.drawEllipse(x - 6, y - 6, 12, 12)
-
-        painter.end()
-
-
-class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         uic.loadUi("main.ui", self)
@@ -488,7 +499,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._map_widget.setPixmap(_px)
         else:
             self._map_widget.setPixmap(QPixmap('map.jpg'))
-        self._map_widget.setScaledContents(True)
+        self._map_widget.setScaledContents(False)
         _layout = self.map_pic.parent().layout()
         if _layout:
             _layout.replaceWidget(self.map_pic, self._map_widget)
