@@ -68,7 +68,7 @@ echo  [OK] pip ready
 echo.
 
 REM ======================================================
-REM 4. Install dependies
+REM 4. Install dependencies
 REM ======================================================
 
 if not exist requirements.txt (
@@ -83,7 +83,6 @@ if not exist requirements.txt (
     )
 )
 
-REM PyQt5
 python -c "import PyQt5" >nul 2>&1
 if errorlevel 1 (
     echo  [SETUP] Installing PyQt5...
@@ -99,7 +98,56 @@ echo  [OK] All dependencies verified
 echo.
 
 REM ======================================================
-REM 5. Check for AI model
+REM 5. Create desktop shortcut (first run only)
+REM ======================================================
+
+echo  [SETUP] Checking desktop shortcut...
+
+REM Full path to this BAT file
+set "SCRIPT_PATH=%~f0"
+set "SCRIPT_DIR=%~dp0"
+
+REM Get real Desktop path (OneDrive & localization safe)
+for /f "delims=" %%i in ('powershell -NoProfile -Command "[Environment]::GetFolderPath(\"Desktop\")"') do set "DESKTOP=%%i"
+
+set "SHORTCUT=%DESKTOP%\SputnikSim.lnk"
+set "ICON_PATH=%SCRIPT_DIR%app.ico"
+
+REM If shortcut already exists → skip creation
+if exist "%SHORTCUT%" (
+    echo  [OK] Shortcut already exists.
+) else (
+    echo  [SETUP] Creating desktop shortcut...
+
+    set "PS_TMP=%TEMP%\sputniksim_shortcut.ps1"
+    (
+    echo $src  = "%SCRIPT_PATH%"
+    echo $dst  = "%SHORTCUT%"
+    echo $wdir = "%SCRIPT_DIR%"
+    echo $ico  = "%ICON_PATH%"
+    echo $ws   = New-Object -ComObject WScript.Shell
+    echo $sc   = $ws.CreateShortcut($dst^)
+    echo $sc.TargetPath       = $src
+    echo $sc.WorkingDirectory = $wdir
+    echo if (Test-Path $ico^) { $sc.IconLocation = $ico }
+    echo $sc.Description      = "SputnikSim Launcher"
+    echo $sc.Save(^)
+    ) > "%PS_TMP%"
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_TMP%" >nul 2>&1
+
+    if errorlevel 1 (
+        echo  [WARNING] Failed to create shortcut.
+    ) else (
+        echo  [OK] Shortcut created: SputnikSim
+    )
+
+    del "%PS_TMP%" >nul 2>&1
+)
+
+echo.
+REM ======================================================
+REM 6. Check for AI model
 REM ======================================================
 
 if not exist AI\model\tle_model_best.pth (
@@ -110,7 +158,7 @@ if not exist AI\model\tle_model_best.pth (
 )
 
 REM ======================================================
-REM 6. Check main.py
+REM 7. Check main.py
 REM ======================================================
 
 if not exist main.py (
@@ -121,7 +169,6 @@ if not exist main.py (
 
 set QT_PLUGIN_PATH=%CD%\venv\Lib\site-packages\PyQt5\Qt5\plugins
 set QT_QPA_PLATFORM_PLUGIN_PATH=%CD%\venv\Lib\site-packages\PyQt5\Qt5\plugins\platforms
-
 
 echo  [SYS] Launching SputnikSim...
 echo  ════════════════════════════════════════════════════════════════════════════════
