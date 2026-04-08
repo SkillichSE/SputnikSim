@@ -1382,5 +1382,4 @@ if __name__ == "__main__":
     window._tle_loader.finished.connect(_on_splash_done)
     splash.raise_()
 
-    with loop:
-        loop.run_forever()
+    sys.exit(app.exec_())
